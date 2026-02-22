@@ -3,57 +3,84 @@ import importlib
 from collections.abc import Mapping
 
 
+UNKNOWN_PLACEHOLDERS = {"", "n/a", "na", "none", "null", "unknown", "-", "--"}
+CRITICAL_METRICS = {
+    "raw_events",
+    "canonical_events",
+    "quarantine_events",
+    "forecast_count",
+    "realized_count",
+    "coverage_pct",
+    "attribution_total",
+    "hard_evidence_pct",
+    "hard_evidence_traceability_pct",
+    "evidence_gap_count",
+}
+
+
 def build_operator_cards(view: Mapping[str, object]) -> dict[str, object]:
-    def to_int(value: object) -> int | None:
+    def parse_int_metric(value: object) -> tuple[int | None, str]:
+        if value is None:
+            return None, "unknown"
         if isinstance(value, bool):
-            return int(value)
+            return int(value), "ok"
         if isinstance(value, int):
-            return value
+            return value, "ok"
         if isinstance(value, float):
-            return int(value)
+            return int(value), "ok"
         if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in UNKNOWN_PLACEHOLDERS:
+                return None, "unknown"
             try:
-                return int(value)
+                return int(value), "ok"
             except ValueError:
                 try:
-                    return int(float(value))
+                    return int(float(value)), "ok"
                 except ValueError:
-                    return None
-        return None
+                    return None, "error"
+        return None, "error"
 
-    def to_float(value: object) -> float | None:
+    def parse_float_metric(value: object) -> tuple[float | None, str]:
+        if value is None:
+            return None, "unknown"
         if isinstance(value, bool):
-            return float(int(value))
+            return float(int(value)), "ok"
         if isinstance(value, (int, float)):
-            return float(value)
+            return float(value), "ok"
         if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in UNKNOWN_PLACEHOLDERS:
+                return None, "unknown"
             try:
-                return float(value)
+                return float(value), "ok"
             except ValueError:
-                return None
-        return None
+                return None, "error"
+        return None, "error"
+
+    metric_status: dict[str, str] = {}
 
     counters = view.get("counters", {})
     if isinstance(counters, Mapping):
-        raw_events = to_int(counters.get("raw_events", 0))
-        canonical_events = to_int(counters.get("canonical_events", 0))
-        quarantine_events = to_int(counters.get("quarantine_events", 0))
+        raw_events, metric_status["raw_events"] = parse_int_metric(counters.get("raw_events"))
+        canonical_events, metric_status["canonical_events"] = parse_int_metric(counters.get("canonical_events"))
+        quarantine_events, metric_status["quarantine_events"] = parse_int_metric(counters.get("quarantine_events"))
     else:
-        raw_events = 0
-        canonical_events = 0
-        quarantine_events = 0
+        raw_events, metric_status["raw_events"] = None, "unknown"
+        canonical_events, metric_status["canonical_events"] = None, "unknown"
+        quarantine_events, metric_status["quarantine_events"] = None, "unknown"
 
     learning = view.get("learning_metrics", {})
     if isinstance(learning, Mapping):
-        forecast_count = to_int(learning.get("forecast_count", 0))
-        realized_count = to_int(learning.get("realized_count", 0))
+        forecast_count, metric_status["forecast_count"] = parse_int_metric(learning.get("forecast_count"))
+        realized_count, metric_status["realized_count"] = parse_int_metric(learning.get("realized_count"))
         realization_coverage = learning.get("realization_coverage")
         hit_rate = learning.get("hit_rate")
         mae = learning.get("mean_abs_forecast_error")
         signed_error = learning.get("mean_signed_forecast_error")
     else:
-        forecast_count = 0
-        realized_count = 0
+        forecast_count, metric_status["forecast_count"] = None, "unknown"
+        realized_count, metric_status["realized_count"] = None, "unknown"
         realization_coverage = None
         hit_rate = None
         mae = None
@@ -61,34 +88,38 @@ def build_operator_cards(view: Mapping[str, object]) -> dict[str, object]:
 
     attribution_summary = view.get("attribution_summary", {})
     if isinstance(attribution_summary, Mapping):
-        attribution_total = to_int(attribution_summary.get("total", 0))
+        attribution_total, metric_status["attribution_total"] = parse_int_metric(attribution_summary.get("total"))
         top_category = str(attribution_summary.get("top_category", "n/a"))
-        top_count = to_int(attribution_summary.get("top_count", 0))
+        top_count, metric_status["attribution_top_count"] = parse_int_metric(attribution_summary.get("top_count"))
         hard_evidence_coverage = attribution_summary.get("hard_evidence_coverage")
         hard_evidence_traceability_coverage = attribution_summary.get(
             "hard_evidence_traceability_coverage"
         )
         soft_evidence_coverage = attribution_summary.get("soft_evidence_coverage")
-        evidence_gap_count = to_int(attribution_summary.get("evidence_gap_count", 0))
+        evidence_gap_count, metric_status["evidence_gap_count"] = parse_int_metric(
+            attribution_summary.get("evidence_gap_count")
+        )
         evidence_gap_coverage = attribution_summary.get("evidence_gap_coverage")
     else:
-        attribution_total = 0
+        attribution_total, metric_status["attribution_total"] = None, "unknown"
         top_category = "n/a"
-        top_count = 0
+        top_count, metric_status["attribution_top_count"] = None, "unknown"
         hard_evidence_coverage = None
         hard_evidence_traceability_coverage = None
         soft_evidence_coverage = None
-        evidence_gap_count = 0
+        evidence_gap_count, metric_status["evidence_gap_count"] = None, "unknown"
         evidence_gap_coverage = None
 
-    realization_coverage_value = to_float(realization_coverage)
-    hit_rate_value = to_float(hit_rate)
-    mae_value = to_float(mae)
-    signed_error_value = to_float(signed_error)
-    hard_evidence_value = to_float(hard_evidence_coverage)
-    hard_evidence_traceability_value = to_float(hard_evidence_traceability_coverage)
-    soft_evidence_value = to_float(soft_evidence_coverage)
-    evidence_gap_value = to_float(evidence_gap_coverage)
+    realization_coverage_value, metric_status["coverage_pct"] = parse_float_metric(realization_coverage)
+    hit_rate_value, metric_status["hit_rate_pct"] = parse_float_metric(hit_rate)
+    mae_value, metric_status["mae_pct"] = parse_float_metric(mae)
+    signed_error_value, metric_status["signed_error_pct"] = parse_float_metric(signed_error)
+    hard_evidence_value, metric_status["hard_evidence_pct"] = parse_float_metric(hard_evidence_coverage)
+    hard_evidence_traceability_value, metric_status["hard_evidence_traceability_pct"] = parse_float_metric(
+        hard_evidence_traceability_coverage
+    )
+    soft_evidence_value, metric_status["soft_evidence_pct"] = parse_float_metric(soft_evidence_coverage)
+    evidence_gap_value, metric_status["evidence_gap_pct"] = parse_float_metric(evidence_gap_coverage)
 
     coverage_pct = "n/a" if realization_coverage_value is None else f"{realization_coverage_value * 100:.1f}%"
     hit_rate_pct = "n/a" if hit_rate_value is None else f"{hit_rate_value * 100:.1f}%"
@@ -100,6 +131,12 @@ def build_operator_cards(view: Mapping[str, object]) -> dict[str, object]:
     )
     soft_evidence_pct = "n/a" if soft_evidence_value is None else f"{soft_evidence_value * 100:.1f}%"
     evidence_gap_pct = "n/a" if evidence_gap_value is None else f"{evidence_gap_value * 100:.1f}%"
+
+    critical_unknown_or_error = [
+        metric_name
+        for metric_name in CRITICAL_METRICS
+        if metric_status.get(metric_name) in {"unknown", "error"}
+    ]
 
     return {
         "last_run_status": str(view.get("last_run_status", "no-data")),
@@ -121,6 +158,8 @@ def build_operator_cards(view: Mapping[str, object]) -> dict[str, object]:
         "soft_evidence_pct": soft_evidence_pct,
         "evidence_gap_count": "n/a" if evidence_gap_count is None else evidence_gap_count,
         "evidence_gap_pct": evidence_gap_pct,
+        "metric_status": metric_status,
+        "critical_unknown_or_error": critical_unknown_or_error,
     }
 
 
@@ -141,6 +180,12 @@ def run_streamlit_app(dsn: str) -> None:
     st.set_page_config(page_title="Ingestion Operator Dashboard", layout="wide")
     st.title("Ingestion Operator Dashboard")
     st.caption("Manual update monitoring (cron separated)")
+
+    if cards["critical_unknown_or_error"]:
+        st.warning(
+            "Some dashboard metrics are unavailable or malformed; verify the data pipeline before acting. "
+            f"Critical metrics affected: {', '.join(cards['critical_unknown_or_error'])}"
+        )
 
     c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16 = st.columns(16)
     c1.metric("Last Status", cards["last_run_status"], cards["last_run_time"])

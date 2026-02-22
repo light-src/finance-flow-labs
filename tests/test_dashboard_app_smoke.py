@@ -58,6 +58,9 @@ def test_dashboard_app_builds_cards_from_view_model():
     assert cards["soft_evidence_pct"] == "57.0%"
     assert cards["evidence_gap_count"] == 1
     assert cards["evidence_gap_pct"] == "14.0%"
+    assert cards["metric_status"]["raw_events"] == "ok"
+    assert cards["metric_status"]["coverage_pct"] == "ok"
+    assert cards["critical_unknown_or_error"] == []
 
 
 def test_dashboard_app_treats_malformed_count_metrics_as_unknown():
@@ -88,6 +91,32 @@ def test_dashboard_app_treats_malformed_count_metrics_as_unknown():
     assert cards["attribution_total"] == "n/a"
     assert cards["attribution_top_count"] == "n/a"
     assert cards["evidence_gap_count"] == "n/a"
+    assert cards["metric_status"]["raw_events"] == "unknown"
+    assert cards["metric_status"]["attribution_total"] == "error"
+    assert "attribution_total" in cards["critical_unknown_or_error"]
+
+
+def test_dashboard_app_keeps_genuine_zero_metrics_as_zero():
+    cards = dashboard_app.build_operator_cards(
+        {
+            "counters": {
+                "raw_events": 0,
+                "canonical_events": "0",
+                "quarantine_events": 0.0,
+            },
+            "learning_metrics": {
+                "forecast_count": "0",
+                "realized_count": 0,
+            },
+        }
+    )
+
+    assert cards["raw_events"] == 0
+    assert cards["canonical_events"] == 0
+    assert cards["quarantine_events"] == 0
+    assert cards["forecast_count"] == 0
+    assert cards["realized_count"] == 0
+    assert cards["metric_status"]["raw_events"] == "ok"
 
 
 def test_dashboard_app_parses_numeric_strings_for_percent_metrics():
