@@ -39,7 +39,7 @@ def test_main_defaults_to_enduser_view(monkeypatch):
 
     assert calls == [("enduser", False)]
     assert fake_st.query_params["view"] == "enduser"
-    assert banner_calls == []
+    assert banner_calls == ["called"]
 
 
 def test_main_supports_operator_deep_link(monkeypatch):

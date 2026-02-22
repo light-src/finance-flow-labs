@@ -42,9 +42,10 @@ def test_resolve_view_uses_session_state_when_query_missing():
     assert warning is None
 
 
-def test_access_banner_visibility_is_operator_only():
+def test_access_banner_visibility_is_enabled_for_both_views():
     assert router._should_render_access_status_banner("operator") is True
-    assert router._should_render_access_status_banner("enduser") is False
+    assert router._should_render_access_status_banner("enduser") is True
+    assert router._should_render_access_status_banner("unknown") is False
 
 
 def test_run_view_app_passes_configure_page_when_supported():

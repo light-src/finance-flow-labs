@@ -49,7 +49,7 @@ def resolve_view(
 
 
 def _should_render_access_status_banner(active_view: str) -> bool:
-    return active_view == "operator"
+    return active_view in VALID_VIEWS
 
 
 def _render_access_status_banner() -> None:
