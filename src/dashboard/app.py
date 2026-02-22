@@ -232,7 +232,15 @@ def build_operator_cards(view: Mapping[str, object]) -> dict[str, object]:
     primary_horizon_reliability_alert = bool(
         primary_horizon_row
         and primary_horizon_row.get("reliability") in {"insufficient", "low_sample"}
+        and primary_horizon_row.get("reliability_reason") != "missing_reliability_metadata"
     )
+    if primary_horizon_reliability_alert:
+        reliability_state = str(primary_horizon_row.get("reliability", "insufficient")) if primary_horizon_row else "insufficient"
+        guardrail_reason = f"primary_horizon_unreliable:{reliability_state}"
+        metrics["coverage_pct"] = _metric("n/a", status="warn", reason=guardrail_reason)
+        metrics["hit_rate_pct"] = _metric("n/a", status="warn", reason=guardrail_reason)
+        metrics["mae_pct"] = _metric("n/a", status="warn", reason=guardrail_reason)
+        metrics["signed_error_pct"] = _metric("n/a", status="warn", reason=guardrail_reason)
 
     policy_payload = view.get("policy_compliance", {})
     policy_checks = policy_payload.get("checks") if isinstance(policy_payload, Mapping) else None

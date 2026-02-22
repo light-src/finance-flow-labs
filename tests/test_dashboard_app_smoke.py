@@ -278,6 +278,67 @@ def test_dashboard_app_flags_primary_horizon_reliability_guardrail():
     assert cards["learning_metrics_panel"][1]["status"] == "warn"
 
 
+def test_dashboard_app_hides_primary_kpis_when_reliability_is_not_ready():
+    cards = dashboard_app.build_operator_cards(
+        {
+            "learning_metrics": {
+                "forecast_count": 12,
+                "realized_count": 9,
+                "realization_coverage": 0.75,
+                "hit_rate": 0.55,
+                "mean_abs_forecast_error": 0.03,
+                "mean_signed_forecast_error": -0.01,
+            },
+            "learning_metrics_by_horizon": {
+                "1W": {
+                    "horizon": "1W",
+                    "forecast_count": 10,
+                    "realized_count": 9,
+                    "realization_coverage": 0.9,
+                    "hit_rate": 0.6,
+                    "mean_abs_forecast_error": 0.02,
+                    "reliability_state": "reliable",
+                    "reliability_reason": "sample_and_coverage_ok",
+                    "min_realized_required": 8,
+                },
+                "1M": {
+                    "horizon": "1M",
+                    "forecast_count": 12,
+                    "realized_count": 9,
+                    "realization_coverage": 0.75,
+                    "hit_rate": 0.55,
+                    "mean_abs_forecast_error": 0.03,
+                    "reliability_state": "insufficient",
+                    "reliability_reason": "realized_count_below_min:9<12",
+                    "min_realized_required": 12,
+                },
+                "3M": {
+                    "horizon": "3M",
+                    "forecast_count": 6,
+                    "realized_count": 6,
+                    "realization_coverage": 1.0,
+                    "hit_rate": 0.66,
+                    "mean_abs_forecast_error": 0.04,
+                    "reliability_state": "reliable",
+                    "reliability_reason": "sample_and_coverage_ok",
+                    "min_realized_required": 6,
+                },
+            },
+        }
+    )
+
+    assert cards["has_primary_horizon_reliability_alert"] is True
+    assert cards["coverage_pct"] == "n/a"
+    assert cards["hit_rate_pct"] == "n/a"
+    assert cards["mae_pct"] == "n/a"
+    assert cards["signed_error_pct"] == "n/a"
+    assert cards["metric_status"]["hit_rate_pct"]["status"] == "warn"
+    assert (
+        cards["metric_status"]["hit_rate_pct"]["reason"]
+        == "primary_horizon_unreliable:insufficient"
+    )
+
+
 def test_dashboard_app_uses_policy_compliance_payload_when_present():
     cards = dashboard_app.build_operator_cards(
         {
