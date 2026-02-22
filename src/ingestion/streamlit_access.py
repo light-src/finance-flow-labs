@@ -143,10 +143,9 @@ def _check_streamlit_access_once(
         next_url = urljoin(url, location)
         auth_wall_from_location = _is_auth_wall_url(next_url)
 
-    # Streamlit Community Cloud may transiently bounce through auth endpoints even for public apps.
-    # Treat auth wall as fatal only when the final response is still an auth/login endpoint or when
-    # the current response explicitly points to auth wall via Location header.
-    auth_wall_redirect = auth_wall_final_url or auth_wall_from_location
+    # Auth wall presence anywhere in the redirect chain is treated as a user-facing access failure.
+    # Even if the final URL recovers to app root, users can still get stuck in login/auth loops.
+    auth_wall_redirect = auth_wall_final_url or auth_wall_seen_in_history or auth_wall_from_location
 
     if auth_wall_redirect:
         return AccessCheckResult(
