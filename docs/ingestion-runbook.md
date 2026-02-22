@@ -169,3 +169,20 @@ Rollback steps (when a recent deployment introduced auth-wall regression):
   - if the script exits non-zero in deploy/ops automation, treat it as **critical access regression** and page operator.
 - Alert clear rule:
   - close alert only after one clean rerun (`exit 0`) from a fresh session and visibility mode verification.
+
+### External liveness/readiness probe
+
+For deterministic external monitoring (and to catch shell-fallback regressions on non-UI routes), run:
+
+```bash
+python3 scripts/health_probe.py --url https://finance-flow-labs.streamlit.app/
+```
+
+Probe assertions:
+- `/healthz` returns HTTP 200 + `application/json`
+- `/readyz` returns HTTP 200 + `application/json` (not Streamlit shell HTML)
+- `/manifest.json` and `/robots.txt` do **not** return Streamlit shell fallback HTML
+
+Alert severity guidance:
+- `/readyz` + `shell_fallback_detected` => **critical**
+- Static route shell fallback (`/manifest.json`, `/robots.txt`) => **warning**
