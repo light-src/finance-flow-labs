@@ -915,6 +915,79 @@ class PostgresRepository:
         conn.close()
         return [dict(zip(columns, row)) for row in rows]
 
+    def read_latest_portfolio_exposure_snapshot(self) -> dict[str, object]:
+        """Return latest paper-portfolio exposure metrics for policy checks.
+
+        Expected metric_name keys in canonical_fact_store:
+        - portfolio_exposure_leverage_weight
+        - portfolio_exposure_crypto_total_weight
+        - portfolio_exposure_crypto_btc_eth_weight
+        - portfolio_exposure_crypto_alt_weight
+        """
+        conn: ConnectionProtocol = self._connect()
+        cursor: CursorProtocol = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                WITH latest AS (
+                    SELECT DISTINCT ON (metric_name)
+                        metric_name,
+                        metric_value,
+                        as_of,
+                        source,
+                        lineage_id
+                    FROM canonical_fact_store
+                    WHERE metric_name IN (
+                        'portfolio_exposure_leverage_weight',
+                        'portfolio_exposure_crypto_total_weight',
+                        'portfolio_exposure_crypto_btc_eth_weight',
+                        'portfolio_exposure_crypto_alt_weight'
+                    )
+                    ORDER BY metric_name, as_of DESC, ingested_at DESC
+                )
+                SELECT metric_name, metric_value, as_of, source, lineage_id
+                FROM latest
+                """,
+                (),
+            )
+            rows = cursor.fetchall()
+            if not rows:
+                return {}
+
+            payload: dict[str, object] = {}
+            as_of_candidates: list[object] = []
+            source_candidates: list[object] = []
+            lineage_candidates: list[object] = []
+            key_map = {
+                "portfolio_exposure_leverage_weight": "leverage_weight",
+                "portfolio_exposure_crypto_total_weight": "crypto_total_weight",
+                "portfolio_exposure_crypto_btc_eth_weight": "crypto_btc_eth_weight",
+                "portfolio_exposure_crypto_alt_weight": "crypto_alt_weight",
+            }
+            for metric_name, metric_value, as_of, source, lineage_id in rows:
+                if metric_name in key_map:
+                    payload[key_map[metric_name]] = metric_value
+                if as_of is not None:
+                    as_of_candidates.append(as_of)
+                if source is not None:
+                    source_candidates.append(source)
+                if lineage_id is not None:
+                    lineage_candidates.append(lineage_id)
+
+            if as_of_candidates:
+                payload["as_of"] = max(as_of_candidates)
+            if source_candidates:
+                payload["source"] = str(source_candidates[0])
+            if lineage_candidates:
+                payload["lineage_id"] = str(lineage_candidates[0])
+
+            return payload
+        except Exception:
+            return {}
+        finally:
+            cursor.close()
+            conn.close()
+
     def read_canonical_facts(
         self, source: str, metric_name: str, limit: int = 12
     ) -> list[dict[str, object]]:

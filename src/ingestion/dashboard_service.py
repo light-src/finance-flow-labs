@@ -1,6 +1,7 @@
 import json
 import os
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Protocol
 
 
@@ -9,6 +10,7 @@ DEFAULT_MIN_REALIZED_BY_HORIZON: dict[str, int] = {"1W": 8, "1M": 12, "3M": 6}
 DEFAULT_COVERAGE_FLOOR: float = 0.4
 POLICY_CHECK_BENCHMARK_KEYS: tuple[str, ...] = ("QQQ", "KOSPI200", "BTC", "SGOV")
 POLICY_LOCK_REFERENCE = "docs/POLICY_LOCK_V1.md"
+POLICY_MAX_EXPOSURE_STALENESS_HOURS = 24 * 7
 
 
 class DashboardRepositoryProtocol(Protocol):
@@ -21,6 +23,33 @@ class DashboardRepositoryProtocol(Protocol):
     def read_forecast_error_category_stats(
         self, horizon: str = "1M", limit: int = 5
     ) -> list[dict[str, object]]: ...
+
+    def read_latest_portfolio_exposure_snapshot(self) -> dict[str, object]: ...
+
+
+def _parse_iso_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    if trimmed == "":
+        return None
+    normalized = trimmed.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _count_non_empty_evidence(value: object) -> bool:
@@ -255,33 +284,122 @@ def _build_policy_compliance(
         ]
     )
 
-    checks.extend(
-        [
-            {
-                "check": "Crypto scope lock (BTC/ETH core + top alts 일부)",
-                "status": "PASS",
-                "reason": "Policy lock allows BTC/ETH core with capped top-alt sleeve.",
-                "as_of": latest_run_time,
-                "evidence": {"policy_lock": POLICY_LOCK_REFERENCE},
-            },
+    checks.append(
+        {
+            "check": "Crypto scope lock (BTC/ETH core + top alts 일부)",
+            "status": "PASS",
+            "reason": "Policy lock allows BTC/ETH core with capped top-alt sleeve.",
+            "as_of": latest_run_time,
+            "evidence": {"policy_lock": POLICY_LOCK_REFERENCE},
+        }
+    )
+
+    max_staleness_hours = _int_env(
+        "POLICY_EXPOSURE_MAX_STALENESS_HOURS", POLICY_MAX_EXPOSURE_STALENESS_HOURS
+    )
+    exposure_snapshot = _safe_repo_call(
+        {}, getattr(repository, "read_latest_portfolio_exposure_snapshot", None)
+    )
+    if not isinstance(exposure_snapshot, dict):
+        exposure_snapshot = {}
+
+    exposure_as_of = exposure_snapshot.get("as_of") or latest_run_time
+    exposure_dt = _parse_iso_datetime(exposure_snapshot.get("as_of"))
+    exposure_stale = False
+    if exposure_dt is not None:
+        age_hours = (datetime.now(timezone.utc) - exposure_dt).total_seconds() / 3600.0
+        exposure_stale = age_hours > max_staleness_hours
+
+    leverage_weight = _float_or_none(exposure_snapshot.get("leverage_weight"))
+    crypto_total_weight = _float_or_none(exposure_snapshot.get("crypto_total_weight"))
+    crypto_btc_eth_weight = _float_or_none(exposure_snapshot.get("crypto_btc_eth_weight"))
+    crypto_alt_weight = _float_or_none(exposure_snapshot.get("crypto_alt_weight"))
+
+    exposure_evidence = {
+        "as_of": exposure_snapshot.get("as_of"),
+        "source": exposure_snapshot.get("source"),
+        "lineage_id": exposure_snapshot.get("lineage_id"),
+        "leverage_weight": leverage_weight,
+        "crypto_total_weight": crypto_total_weight,
+        "crypto_btc_eth_weight": crypto_btc_eth_weight,
+        "crypto_alt_weight": crypto_alt_weight,
+        "max_staleness_hours": max_staleness_hours,
+    }
+
+    if exposure_stale:
+        checks.append(
             {
                 "check": "Crypto sleeve composition (BTC/ETH >=70%, alts <=30%)",
                 "status": "UNKNOWN",
-                "reason": "Portfolio crypto sleeve exposure feed not available.",
-                "as_of": latest_run_time,
-                "evidence": {"dependency": "portfolio_exposure_crypto_sleeve"},
-            },
-        ]
-    )
-    checks.append(
-        {
-            "check": "Leverage sleeve cap (<=20%)",
-            "status": "UNKNOWN",
-            "reason": "Portfolio leverage exposure feed not available.",
-            "as_of": latest_run_time,
-            "evidence": {"dependency": "portfolio_exposure_leverage_sleeve"},
-        }
-    )
+                "reason": "portfolio_exposure_stale",
+                "as_of": exposure_as_of,
+                "evidence": exposure_evidence,
+            }
+        )
+    elif (
+        crypto_total_weight is None
+        or crypto_total_weight <= 0
+        or crypto_btc_eth_weight is None
+        or crypto_alt_weight is None
+    ):
+        checks.append(
+            {
+                "check": "Crypto sleeve composition (BTC/ETH >=70%, alts <=30%)",
+                "status": "UNKNOWN",
+                "reason": "portfolio_exposure_missing_or_invalid",
+                "as_of": exposure_as_of,
+                "evidence": exposure_evidence,
+            }
+        )
+    else:
+        crypto_btc_eth_share = crypto_btc_eth_weight / crypto_total_weight
+        crypto_alt_share = crypto_alt_weight / crypto_total_weight
+        crypto_ok = crypto_btc_eth_share >= 0.70 and crypto_alt_share <= 0.30
+        checks.append(
+            {
+                "check": "Crypto sleeve composition (BTC/ETH >=70%, alts <=30%)",
+                "status": "PASS" if crypto_ok else "FAIL",
+                "reason": "within_threshold" if crypto_ok else "threshold_breach",
+                "as_of": exposure_as_of,
+                "evidence": {
+                    **exposure_evidence,
+                    "crypto_btc_eth_share": crypto_btc_eth_share,
+                    "crypto_alt_share": crypto_alt_share,
+                },
+            }
+        )
+
+    if exposure_stale:
+        checks.append(
+            {
+                "check": "Leverage sleeve cap (<=20%)",
+                "status": "UNKNOWN",
+                "reason": "portfolio_exposure_stale",
+                "as_of": exposure_as_of,
+                "evidence": exposure_evidence,
+            }
+        )
+    elif leverage_weight is None:
+        checks.append(
+            {
+                "check": "Leverage sleeve cap (<=20%)",
+                "status": "UNKNOWN",
+                "reason": "portfolio_exposure_missing_or_invalid",
+                "as_of": exposure_as_of,
+                "evidence": exposure_evidence,
+            }
+        )
+    else:
+        leverage_ok = leverage_weight <= 0.20
+        checks.append(
+            {
+                "check": "Leverage sleeve cap (<=20%)",
+                "status": "PASS" if leverage_ok else "FAIL",
+                "reason": "within_threshold" if leverage_ok else "threshold_breach",
+                "as_of": exposure_as_of,
+                "evidence": exposure_evidence,
+            }
+        )
 
     primary = learning_metrics_by_horizon.get("1M", {})
     reliability = str(primary.get("reliability_state", "insufficient"))

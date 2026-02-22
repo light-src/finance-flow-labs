@@ -12,6 +12,17 @@ class FakeDashboardRepo:
     def read_macro_series_points(self, metric_key, limit=1):
         return [{"metric_key": metric_key, "as_of": "2026-02-22T08:00:00Z", "value": 1.0}]
 
+    def read_latest_portfolio_exposure_snapshot(self):
+        return {
+            "as_of": "2026-02-22T08:00:00Z",
+            "source": "paper_portfolio",
+            "lineage_id": "lineage-1",
+            "leverage_weight": 0.20,
+            "crypto_total_weight": 0.40,
+            "crypto_btc_eth_weight": 0.28,
+            "crypto_alt_weight": 0.12,
+        }
+
     def read_latest_runs(self, limit=20):
         return [
             {"run_id": "run-2", "status": "success", "finished_at": "2026-02-18T01:00:00Z"},
@@ -90,7 +101,9 @@ def test_dashboard_service_builds_operator_view_model():
     assert view["attribution_gap_rows"][0]["evidence_gap_reason"] == "hard_untraceable"
     assert view["attribution_gap_rows"][-1]["evidence_gap_reason"] == "missing_hard_and_soft"
     assert view["policy_compliance"]["summary"]["total"] == 11
-    assert view["policy_compliance"]["summary"]["unknown"] == 2
+    assert view["policy_compliance"]["summary"]["unknown"] == 0
+    assert view["policy_compliance"]["checks"][4]["status"] == "PASS"
+    assert view["policy_compliance"]["checks"][5]["status"] == "PASS"
     assert view["policy_compliance"]["checks"][6]["status"] == "WARN"
     assert view["policy_compliance"]["checks"][7]["status"] == "PASS"
     assert len(view["recent_runs"]) == 2
@@ -227,8 +240,8 @@ def test_dashboard_service_policy_checks_include_as_of_from_latest_run_when_dire
     assert checks[1]["as_of"] == "2026-02-18T01:00:00Z"
     assert checks[2]["as_of"] == "2026-02-18T01:00:00Z"
     assert checks[3]["as_of"] == "2026-02-18T01:00:00Z"
-    assert checks[4]["as_of"] == "2026-02-18T01:00:00Z"
-    assert checks[5]["as_of"] == "2026-02-18T01:00:00Z"
+    assert checks[4]["as_of"] == "2026-02-22T08:00:00Z"
+    assert checks[5]["as_of"] == "2026-02-22T08:00:00Z"
     assert checks[6]["as_of"] == "2026-02-18T01:00:00Z"
 
 
@@ -252,3 +265,69 @@ def test_dashboard_service_learning_reliability_threshold_env_override(monkeypat
     assert rel["reliability_state"] == "low_sample"
     assert "coverage_below_floor" in rel["reliability_reason"]
     assert rel["min_realized_required"] == 10
+
+
+def test_dashboard_service_policy_exposure_threshold_boundaries_pass_exact():
+    view = build_dashboard_view(FakeDashboardRepo())
+    checks = view["policy_compliance"]["checks"]
+
+    crypto_check = checks[4]
+    leverage_check = checks[5]
+
+    assert crypto_check["status"] == "PASS"
+    assert crypto_check["evidence"]["crypto_btc_eth_share"] == pytest.approx(0.70)
+    assert crypto_check["evidence"]["crypto_alt_share"] == pytest.approx(0.30)
+    assert leverage_check["status"] == "PASS"
+
+
+def test_dashboard_service_policy_exposure_threshold_breach_fails():
+    class BreachRepo(FakeDashboardRepo):
+        def read_latest_portfolio_exposure_snapshot(self):
+            return {
+                "as_of": "2026-02-22T08:00:00Z",
+                "leverage_weight": 0.21,
+                "crypto_total_weight": 0.40,
+                "crypto_btc_eth_weight": 0.27,
+                "crypto_alt_weight": 0.13,
+            }
+
+    view = build_dashboard_view(BreachRepo())
+    checks = view["policy_compliance"]["checks"]
+
+    assert checks[4]["status"] == "FAIL"
+    assert checks[5]["status"] == "FAIL"
+
+
+def test_dashboard_service_policy_exposure_missing_data_unknown():
+    class MissingExposureRepo(FakeDashboardRepo):
+        def read_latest_portfolio_exposure_snapshot(self):
+            return {}
+
+    view = build_dashboard_view(MissingExposureRepo())
+    checks = view["policy_compliance"]["checks"]
+
+    assert checks[4]["status"] == "UNKNOWN"
+    assert checks[4]["reason"] == "portfolio_exposure_missing_or_invalid"
+    assert checks[5]["status"] == "UNKNOWN"
+
+
+def test_dashboard_service_policy_exposure_stale_data_unknown(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("POLICY_EXPOSURE_MAX_STALENESS_HOURS", "1")
+
+    class StaleExposureRepo(FakeDashboardRepo):
+        def read_latest_portfolio_exposure_snapshot(self):
+            return {
+                "as_of": "2000-01-01T00:00:00Z",
+                "leverage_weight": 0.20,
+                "crypto_total_weight": 0.40,
+                "crypto_btc_eth_weight": 0.28,
+                "crypto_alt_weight": 0.12,
+            }
+
+    view = build_dashboard_view(StaleExposureRepo())
+    checks = view["policy_compliance"]["checks"]
+
+    assert checks[4]["status"] == "UNKNOWN"
+    assert checks[4]["reason"] == "portfolio_exposure_stale"
+    assert checks[5]["status"] == "UNKNOWN"
+    assert checks[5]["reason"] == "portfolio_exposure_stale"

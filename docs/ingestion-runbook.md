@@ -98,8 +98,9 @@ Validation guardrails:
   - recent run history
   - policy compliance block (PASS/WARN/FAIL/UNKNOWN):
     - Universe coverage (US/KR/Crypto): currently validated via ingestion presence; region-level tagging dependency surfaced in evidence
-    - Crypto sleeve composition (BTC/ETH >=70%, alts <=30%): `UNKNOWN` until portfolio sleeve exposure feed exists
-    - Leverage sleeve cap (<=20%): `UNKNOWN` until portfolio leverage exposure feed exists
+    - Crypto sleeve composition (BTC/ETH >=70%, alts <=30%): computed from latest portfolio exposure snapshot (`crypto_total`, `crypto_btc_eth`, `crypto_alt`) and marked PASS/FAIL by threshold
+    - Leverage sleeve cap (<=20%): computed from latest `leverage_weight` and marked PASS/FAIL by threshold
+    - Exposure checks downgrade to `UNKNOWN` only when exposure data is missing/invalid or stale (default stale threshold: 7 days, env override `POLICY_EXPOSURE_MAX_STALENESS_HOURS`)
     - Primary horizon readiness (1M): mapped from reliability state (`reliable`→PASS, `low_sample`→WARN, `insufficient`→FAIL)
     - Benchmark readiness (QQQ/KOSPI200/BTC/SGOV): checks latest `macro_series_points` presence per component
     - Summary counters shown for PASS/WARN/FAIL/UNKNOWN (no silent PASS on missing dependencies)
