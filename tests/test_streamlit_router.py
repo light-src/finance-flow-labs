@@ -38,3 +38,26 @@ def test_resolve_view_uses_session_state_when_query_missing():
 def test_access_banner_visibility_is_operator_only():
     assert router._should_render_access_status_banner("operator") is True
     assert router._should_render_access_status_banner("enduser") is False
+
+
+def test_run_view_app_passes_configure_page_when_supported():
+    called: dict[str, object] = {}
+
+    def supported(dsn: str, *, configure_page: bool = True) -> None:
+        called["dsn"] = dsn
+        called["configure_page"] = configure_page
+
+    router._run_view_app(supported, "postgres://dsn")
+
+    assert called == {"dsn": "postgres://dsn", "configure_page": False}
+
+
+def test_run_view_app_falls_back_when_configure_page_unsupported():
+    called: dict[str, object] = {}
+
+    def legacy(dsn: str) -> None:
+        called["dsn"] = dsn
+
+    router._run_view_app(legacy, "postgres://legacy")
+
+    assert called == {"dsn": "postgres://legacy"}

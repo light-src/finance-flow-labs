@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import streamlit as st
 
@@ -84,6 +84,22 @@ def _render_view_toggle(active_view: str) -> str:
     return "enduser" if selected == "End-user" else "operator"
 
 
+def _run_view_app(app_fn: Callable[..., None], dsn: str) -> None:
+    """Invoke view app without duplicate page config, with legacy compatibility.
+
+    Some deployments can end up with version-skewed modules where app_fn does not
+    accept ``configure_page`` yet. Fall back to the legacy signature instead of
+    crashing the whole Streamlit shell.
+    """
+
+    try:
+        app_fn(dsn, configure_page=False)
+    except TypeError as exc:
+        if "configure_page" not in str(exc):
+            raise
+        app_fn(dsn)
+
+
 def main() -> None:
     dsn = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
     if not dsn:
@@ -105,9 +121,9 @@ def main() -> None:
         _render_access_status_banner()
 
     if selected_view == "operator":
-        run_streamlit_app(dsn, configure_page=False)
+        _run_view_app(run_streamlit_app, dsn)
     else:
-        run_enduser_app(dsn, configure_page=False)
+        _run_view_app(run_enduser_app, dsn)
 
 
 if __name__ == "__main__":
