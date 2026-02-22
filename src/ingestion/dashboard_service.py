@@ -1,6 +1,7 @@
 import json
 import os
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 
@@ -9,6 +10,22 @@ DEFAULT_MIN_REALIZED_BY_HORIZON: dict[str, int] = {"1W": 8, "1M": 12, "3M": 6}
 DEFAULT_COVERAGE_FLOOR: float = 0.4
 POLICY_CHECK_BENCHMARK_KEYS: tuple[str, ...] = ("QQQ", "KOSPI200", "BTC", "SGOV")
 POLICY_LOCK_REFERENCE = "docs/POLICY_LOCK_V1.md"
+DEFAULT_BENCHMARK_STALE_DAYS = 7
+
+
+def _parse_iso8601(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class DashboardRepositoryProtocol(Protocol):
@@ -323,9 +340,22 @@ def _build_policy_compliance(
         benchmark_as_of = {key: None for key in POLICY_CHECK_BENCHMARK_KEYS}
 
     missing_keys = [key for key, count in benchmark_points.items() if count == 0]
+    stale_days = max(1, int(os.getenv("POLICY_BENCHMARK_MAX_STALE_DAYS", str(DEFAULT_BENCHMARK_STALE_DAYS))))
+    reference_dt = _parse_iso8601(latest_run_time) or datetime.now(timezone.utc)
+    stale_before = reference_dt - timedelta(days=stale_days)
+    stale_keys = [
+        key
+        for key, as_of in benchmark_as_of.items()
+        if benchmark_points.get(key, 0) > 0
+        and ((_parse_iso8601(as_of) is None) or (_parse_iso8601(as_of) < stale_before))
+    ]
+
     if missing_keys:
         benchmark_status = "WARN"
         benchmark_reason = f"Missing benchmark series: {', '.join(missing_keys)}"
+    elif stale_keys:
+        benchmark_status = "WARN"
+        benchmark_reason = f"Stale benchmark series (>{stale_days}d): {', '.join(stale_keys)}"
     else:
         benchmark_status = "PASS"
         benchmark_reason = "All benchmark components have recent points."
@@ -339,6 +369,8 @@ def _build_policy_compliance(
             "evidence": {
                 "series_point_count": benchmark_points,
                 "series_latest_as_of": benchmark_as_of,
+                "max_stale_days": stale_days,
+                "stale_series": stale_keys,
             },
         }
     )

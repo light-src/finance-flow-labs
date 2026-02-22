@@ -232,6 +232,21 @@ def test_dashboard_service_policy_checks_include_as_of_from_latest_run_when_dire
     assert checks[6]["as_of"] == "2026-02-18T01:00:00Z"
 
 
+def test_dashboard_service_policy_compliance_warns_on_stale_benchmark_series(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("POLICY_BENCHMARK_MAX_STALE_DAYS", "7")
+
+    class StaleBenchmarkRepo(FakeDashboardRepo):
+        def read_macro_series_points(self, metric_key, limit=1):
+            return [{"metric_key": metric_key, "as_of": "2026-02-01T00:00:00Z", "value": 1.0}]
+
+    view = build_dashboard_view(StaleBenchmarkRepo())
+    benchmark_check = view["policy_compliance"]["checks"][7]
+
+    assert benchmark_check["status"] == "WARN"
+    assert "Stale benchmark series" in benchmark_check["reason"]
+    assert set(benchmark_check["evidence"]["stale_series"]) == {"QQQ", "KOSPI200", "BTC", "SGOV"}
+
+
 def test_dashboard_service_learning_reliability_threshold_env_override(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("LEARNING_RELIABILITY_MIN_REALIZED_1M", "10")
     monkeypatch.setenv("LEARNING_RELIABILITY_COVERAGE_FLOOR", "0.65")
