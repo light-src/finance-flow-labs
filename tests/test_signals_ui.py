@@ -63,3 +63,21 @@ def test_render_macro_regime_card_placeholder_when_data_missing(monkeypatch):
 
     assert calls["subheader"] == ["Macro regime signal"]
     assert calls["info"] == ["No macro regime signal yet. Analysis pipeline data is pending."]
+
+
+def test_render_macro_regime_card_stale_state(monkeypatch):
+    calls: dict[str, list] = {"subheader": [], "info": []}
+
+    fake_streamlit = types.SimpleNamespace(
+        subheader=lambda text: calls["subheader"].append(text),
+        info=lambda text: calls["info"].append(text),
+    )
+
+    monkeypatch.setitem(sys.modules, "streamlit", fake_streamlit)
+    sys.modules.pop("src.enduser.signals", None)
+    signals = importlib.import_module("src.enduser.signals")
+
+    signals.render_macro_regime_card({"status": "stale", "reason": "macro signal stale (> 7d)", "as_of": "2026-02-10"})
+
+    assert calls["subheader"] == ["Macro regime signal"]
+    assert calls["info"] == ["macro signal stale (> 7d) (as_of: 2026-02-10)"]

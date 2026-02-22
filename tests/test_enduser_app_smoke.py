@@ -66,7 +66,7 @@ def test_run_enduser_app_renders_portfolio_and_signals_tabs(monkeypatch):
     assert calls["subheader"] == ["Macro regime signal"]
     assert calls["info"] == [
         "Coming soon",
-        "No macro regime signal yet. Analysis pipeline data is pending.",
+        "macro signal read failed",
         "More signal cards coming soon",
     ]
 
