@@ -2,6 +2,7 @@ import argparse
 import importlib
 import json
 import os
+import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -50,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
     _ = forecast_record_create.add_argument("--evidence-hard-json", required=True)
     _ = forecast_record_create.add_argument("--evidence-soft-json", default="[]")
     _ = forecast_record_create.add_argument("--as-of", required=True)
+
+    streamlit_access_probe = subparsers.add_parser("streamlit-access-probe")
+    _ = streamlit_access_probe.add_argument(
+        "--url", default="https://finance-flow-labs.streamlit.app/"
+    )
+    _ = streamlit_access_probe.add_argument("--timeout-seconds", type=float, default=10.0)
 
     return parser
 
@@ -183,6 +190,61 @@ def read_forecast_error_category_stats_command(
     return repository.read_forecast_error_category_stats(horizon=horizon, limit=limit)
 
 
+def probe_streamlit_access_command(
+    url: str = "https://finance-flow-labs.streamlit.app/",
+    timeout_seconds: float = 10.0,
+) -> dict[str, object]:
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, hdrs, newurl):  # type: ignore[override]
+            return None
+
+    request = urllib.request.Request(url=url, method="GET")
+    opener = urllib.request.build_opener(NoRedirect)
+
+    try:
+        with opener.open(request, timeout=timeout_seconds) as response:
+            status_code = response.status
+            headers = dict(response.headers.items())
+    except urllib.error.HTTPError as exc:
+        status_code = exc.code
+        headers = dict(exc.headers.items()) if exc.headers else {}
+    except urllib.error.URLError as exc:
+        return {
+            "url": url,
+            "status": "network_error",
+            "status_code": None,
+            "location": None,
+            "reason": str(exc.reason),
+        }
+
+    location = headers.get("Location") or headers.get("location")
+    if status_code in {301, 302, 303, 307, 308} and location and "share.streamlit.io/-/auth/app" in location:
+        return {
+            "url": url,
+            "status": "auth_wall_redirect",
+            "status_code": status_code,
+            "location": location,
+            "reason": "landing_url_redirects_to_streamlit_auth",
+        }
+
+    if status_code >= 400:
+        return {
+            "url": url,
+            "status": "http_error",
+            "status_code": status_code,
+            "location": location,
+            "reason": "landing_url_returned_error_status",
+        }
+
+    return {
+        "url": url,
+        "status": "ok",
+        "status_code": status_code,
+        "location": location,
+        "reason": "landing_url_accessible",
+    }
+
+
 def create_forecast_record_command(
     thesis_id: str,
     horizon: str,
@@ -276,6 +338,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         print(json.dumps(row, default=str))
         return 0
+
+    if args.command == "streamlit-access-probe":
+        probe = probe_streamlit_access_command(
+            url=args.url,
+            timeout_seconds=args.timeout_seconds,
+        )
+        print(json.dumps(probe, default=str))
+        return 0 if probe.get("status") == "ok" else 2
 
     parser.print_help()
     return 1

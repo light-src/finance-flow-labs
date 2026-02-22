@@ -173,3 +173,67 @@ def test_create_forecast_record_command_rejects_empty_hard_evidence(monkeypatch)
             evidence_hard_json="[]",
             as_of="2026-02-22T00:00:00+00:00",
         )
+
+
+def test_cli_exposes_streamlit_access_probe_command_with_defaults():
+    parser = cli.build_parser()
+    args = parser.parse_args(["streamlit-access-probe"])
+
+    assert args.command == "streamlit-access-probe"
+    assert args.url == "https://finance-flow-labs.streamlit.app/"
+    assert args.timeout_seconds == 10.0
+
+
+def test_probe_streamlit_access_command_detects_auth_wall_redirect(monkeypatch):
+    class FakeHTTPError(cli.urllib.error.HTTPError):
+        def __init__(self):
+            super().__init__(
+                url="https://finance-flow-labs.streamlit.app/",
+                code=303,
+                msg="See Other",
+                hdrs={"Location": "https://share.streamlit.io/-/auth/app?redirect_uri=https://finance-flow-labs.streamlit.app/"},
+                fp=None,
+            )
+
+    class FakeOpener:
+        def open(self, request, timeout=10):
+            raise FakeHTTPError()
+
+    monkeypatch.setattr(cli.urllib.request, "build_opener", lambda *_: FakeOpener())
+
+    probe = cli.probe_streamlit_access_command()
+
+    assert probe["status"] == "auth_wall_redirect"
+    assert probe["status_code"] == 303
+
+
+def test_probe_streamlit_access_command_reports_ok(monkeypatch):
+    class FakeResponse:
+        status = 200
+
+        class headers:
+            @staticmethod
+            def items():
+                return []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeOpener:
+        def open(self, request, timeout=10):
+            return FakeResponse()
+
+    monkeypatch.setattr(cli.urllib.request, "build_opener", lambda *_: FakeOpener())
+
+    probe = cli.probe_streamlit_access_command()
+
+    assert probe == {
+        "url": "https://finance-flow-labs.streamlit.app/",
+        "status": "ok",
+        "status_code": 200,
+        "location": None,
+        "reason": "landing_url_accessible",
+    }

@@ -119,3 +119,22 @@ Validation guardrails:
 5. Set Main file path: `streamlit_app.py`.
 6. Set Secret: `SUPABASE_DB_URL` (or `DATABASE_URL`).
 7. Deploy and copy the generated app URL (`https://<app-name>.streamlit.app`).
+8. In app settings, set visibility policy explicitly and document it in PR/deployment notes:
+   - `Public` if dashboard is intended for unauthenticated operator checks.
+   - `Restricted` only if intentional; in this case the team must provide access instructions out-of-band.
+
+### Streamlit access contract smoke probe
+
+Use this probe to detect the Streamlit auth-wall regression (`share.streamlit.io/-/auth/app` redirect) quickly:
+
+- Command: `python -m src.ingestion.cli streamlit-access-probe --url https://finance-flow-labs.streamlit.app/`
+- Expected status: `ok`
+- Failure statuses:
+  - `auth_wall_redirect`: landing URL redirects to Streamlit auth wall
+  - `http_error`: non-2xx landing response
+  - `network_error`: DNS/TLS/connectivity failure
+
+Suggested monitoring pattern (every 10m):
+- Run the probe from cron/CI.
+- Alert on `status != ok`.
+- Include `status_code` + `location` in alert payload for triage.
