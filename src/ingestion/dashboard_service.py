@@ -57,6 +57,23 @@ def _has_traceable_hard_evidence(value: object) -> bool:
     return False
 
 
+def _classify_evidence_gap_reason(evidence_hard: object, evidence_soft: object) -> str:
+    hard_items = _parse_evidence_items(evidence_hard)
+    soft_items = _parse_evidence_items(evidence_soft)
+
+    has_hard = len(hard_items) > 0
+    has_traceable_hard = _has_traceable_hard_evidence(evidence_hard)
+    has_soft = len(soft_items) > 0
+
+    if has_hard and has_traceable_hard:
+        return "none"
+    if has_hard and not has_traceable_hard:
+        return "hard_untraceable" if has_soft else "hard_untraceable_no_soft"
+    if not has_hard and has_soft:
+        return "missing_hard"
+    return "missing_hard_and_soft"
+
+
 def _safe_repo_call(default: object, fn: object, *args: object, **kwargs: object) -> object:
     try:
         if not callable(fn):
@@ -100,6 +117,8 @@ def build_dashboard_view(
         "evidence_gap_count": 0,
         "evidence_gap_coverage": None,
     }
+    attribution_gap_rows: list[dict[str, object]] = []
+    attribution_gap_rows_status = "unknown"
     if hasattr(repository, "read_forecast_error_category_stats"):
         category_stats = _safe_repo_call(
             [],
@@ -122,12 +141,12 @@ def build_dashboard_view(
             }
 
     if hasattr(repository, "read_forecast_error_attributions"):
-        attribution_rows = _safe_repo_call(
-            [],
-            repository.read_forecast_error_attributions,
-            horizon="1M",
-            limit=200,
-        )
+        try:
+            attribution_rows = repository.read_forecast_error_attributions(horizon="1M", limit=200)
+            attribution_gap_rows_status = "ok"
+        except Exception:
+            attribution_rows = []
+            attribution_gap_rows_status = "unknown"
         if isinstance(attribution_rows, list) and attribution_rows:
             categories = [
                 str(row.get("category", "unknown"))
@@ -161,14 +180,37 @@ def build_dashboard_view(
                 has_hard = _count_non_empty_evidence(row.get("evidence_hard"))
                 has_traceable_hard = _has_traceable_hard_evidence(row.get("evidence_hard"))
                 has_soft = _count_non_empty_evidence(row.get("evidence_soft"))
+                reason = _classify_evidence_gap_reason(
+                    row.get("evidence_hard"),
+                    row.get("evidence_soft"),
+                )
                 if has_hard:
                     hard_count += 1
                 if has_traceable_hard:
                     traceable_hard_count += 1
                 if has_soft:
                     soft_count += 1
-                if not has_hard and not has_soft:
+                if reason != "none":
                     evidence_gap_count += 1
+
+                attribution_gap_rows.append(
+                    {
+                        "attribution_id": row.get("attribution_id"),
+                        "thesis_id": row.get("thesis_id"),
+                        "forecast_id": row.get("forecast_id"),
+                        "horizon": row.get("horizon", "1M"),
+                        "category": row.get("category", "unknown"),
+                        "created_at": row.get("created_at"),
+                        "has_hard_evidence": has_hard,
+                        "has_traceable_hard_evidence": has_traceable_hard,
+                        "has_soft_evidence": has_soft,
+                        "evidence_gap_reason": reason,
+                        "source": row.get("source"),
+                        "metric": row.get("metric"),
+                        "as_of": row.get("as_of"),
+                        "lineage_id": row.get("lineage_id"),
+                    }
+                )
 
             if valid_rows > 0:
                 attribution_summary["total"] = valid_rows
@@ -179,6 +221,8 @@ def build_dashboard_view(
                 attribution_summary["soft_evidence_coverage"] = soft_count / valid_rows
                 attribution_summary["evidence_gap_count"] = evidence_gap_count
                 attribution_summary["evidence_gap_coverage"] = evidence_gap_count / valid_rows
+    else:
+        attribution_gap_rows_status = "unknown"
 
     if isinstance(recent_runs, list) and recent_runs:
         latest = recent_runs[0]
@@ -198,5 +242,7 @@ def build_dashboard_view(
         "counters": counters,
         "learning_metrics": learning_metrics,
         "attribution_summary": attribution_summary,
+        "attribution_gap_rows": attribution_gap_rows[:50],
+        "attribution_gap_rows_status": attribution_gap_rows_status,
         "recent_runs": recent_runs,
     }

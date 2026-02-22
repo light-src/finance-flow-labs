@@ -116,3 +116,26 @@ def test_dashboard_app_parses_numeric_strings_for_percent_metrics():
     assert cards["hard_evidence_traceability_pct"] == "71.0%"
     assert cards["soft_evidence_pct"] == "57.0%"
     assert cards["evidence_gap_pct"] == "14.0%"
+
+
+def test_dashboard_app_builds_attribution_gap_table_default_only_gaps():
+    view = {
+        "attribution_gap_rows": [
+            {"attribution_id": 1, "evidence_gap_reason": "none"},
+            {"attribution_id": 2, "evidence_gap_reason": "missing_hard"},
+        ]
+    }
+    rows = dashboard_app._build_attribution_gap_table(view)
+    assert len(rows) == 1
+    assert rows[0]["attribution_id"] == 2
+
+
+def test_dashboard_app_builds_attribution_gap_table_with_all_rows_toggle():
+    view = {
+        "attribution_gap_rows": [
+            {"attribution_id": 1, "evidence_gap_reason": "none"},
+            {"attribution_id": 2, "evidence_gap_reason": "missing_hard"},
+        ]
+    }
+    rows = dashboard_app._build_attribution_gap_table(view, only_gaps=False)
+    assert len(rows) == 2

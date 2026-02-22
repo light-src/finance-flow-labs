@@ -66,8 +66,13 @@ def test_dashboard_service_builds_operator_view_model():
     assert view["attribution_summary"]["hard_evidence_coverage"] == 0.5
     assert view["attribution_summary"]["hard_evidence_traceability_coverage"] == 0.0
     assert view["attribution_summary"]["soft_evidence_coverage"] == 0.5
-    assert view["attribution_summary"]["evidence_gap_count"] == 1
-    assert view["attribution_summary"]["evidence_gap_coverage"] == 0.25
+    assert view["attribution_summary"]["evidence_gap_count"] == 4
+    assert view["attribution_summary"]["evidence_gap_coverage"] == 1.0
+    assert view["attribution_gap_rows_status"] == "ok"
+    assert len(view["attribution_gap_rows"]) == 4
+    reasons = {row["evidence_gap_reason"] for row in view["attribution_gap_rows"]}
+    assert "hard_untraceable" in reasons
+    assert "hard_untraceable_no_soft" in reasons
     assert len(view["recent_runs"]) == 2
 
 
@@ -92,6 +97,7 @@ def test_dashboard_service_falls_back_when_learning_tables_missing():
     assert view["learning_metrics"]["hit_rate"] is None
     assert view["attribution_summary"]["total"] == 0
     assert view["attribution_summary"]["top_category"] == "n/a"
+    assert view["attribution_gap_rows_status"] == "unknown"
 
 
 class BrokenDashboardRepo:
@@ -147,3 +153,14 @@ def test_dashboard_service_ignores_invalid_string_evidence_payloads():
     assert summary["soft_evidence_coverage"] == 0.5
     assert summary["evidence_gap_count"] == 1
     assert summary["evidence_gap_coverage"] == 0.5
+    rows = view["attribution_gap_rows"]
+    assert rows[0]["evidence_gap_reason"] == "none"
+    assert rows[1]["evidence_gap_reason"] == "missing_hard_and_soft"
+
+
+def test_dashboard_service_classifies_attribution_gap_reasons():
+    classify = dashboard_service._classify_evidence_gap_reason
+    assert classify('[{"source":"FRED","metric":"CPI"}]', '[]') == "none"
+    assert classify('[{"source":"FRED"}]', '[]') == "hard_untraceable_no_soft"
+    assert classify('[]', '[{"note":"narrative"}]') == "missing_hard"
+    assert classify('[]', '[]') == "missing_hard_and_soft"

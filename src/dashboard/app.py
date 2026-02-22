@@ -124,6 +124,16 @@ def build_operator_cards(view: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _build_attribution_gap_table(view: Mapping[str, object], only_gaps: bool = True) -> list[dict[str, object]]:
+    rows = view.get("attribution_gap_rows", [])
+    if not isinstance(rows, list):
+        return []
+    normalized = [row for row in rows if isinstance(row, Mapping)]
+    if only_gaps:
+        normalized = [row for row in normalized if str(row.get("evidence_gap_reason", "none")) != "none"]
+    return [dict(row) for row in normalized]
+
+
 def load_dashboard_view(dsn: str) -> dict[str, object]:
     dashboard_service = importlib.import_module("src.ingestion.dashboard_service")
     postgres_repository = importlib.import_module("src.ingestion.postgres_repository")
@@ -159,6 +169,17 @@ def run_streamlit_app(dsn: str) -> None:
     c14.metric("HARD Trace", cards["hard_evidence_traceability_pct"])
     c15.metric("SOFT Evd", cards["soft_evidence_pct"])
     c16.metric("No-Evd Attr", cards["evidence_gap_count"], cards["evidence_gap_pct"])
+
+    st.subheader("Attribution Evidence Gaps (1M)")
+    gap_status = str(view.get("attribution_gap_rows_status", "unknown"))
+    show_all_rows = st.checkbox("Show all recent attribution rows", value=False)
+    gap_rows = _build_attribution_gap_table(view, only_gaps=not show_all_rows)
+    if gap_status != "ok":
+        st.warning("Attribution dataset is unavailable or unreadable (status: unknown).")
+    if gap_rows:
+        st.dataframe(gap_rows, use_container_width=True)
+    elif gap_status == "ok":
+        st.info("No attribution evidence gaps found in recent 1M rows.")
 
     recent_runs = view.get("recent_runs", [])
     if isinstance(recent_runs, list) and recent_runs:
