@@ -21,6 +21,7 @@ class AccessCheckResult:
     final_url: str
     auth_wall_redirect: bool
     reason: str
+    redirect_chain: tuple[str, ...] = ()
 
     @property
     def alert(self) -> bool:
@@ -54,6 +55,7 @@ class AccessCheckResult:
             "final_url": self.final_url,
             "auth_wall_redirect": self.auth_wall_redirect,
             "reason": self.reason,
+            "redirect_chain": list(self.redirect_chain),
             "alert": self.alert,
             "alert_severity": self.alert_severity,
             "remediation_hint": self.remediation_hint,
@@ -122,6 +124,7 @@ def _check_streamlit_access_once(
             final_url=url,
             auth_wall_redirect=False,
             reason=f"network_error:{exc.reason}",
+            redirect_chain=(),
         )
 
     location = headers.get("Location") or headers.get("location")
@@ -137,6 +140,7 @@ def _check_streamlit_access_once(
             final_url=final_url,
             auth_wall_redirect=True,
             reason="auth_wall_redirect_detected",
+            redirect_chain=tuple(redirect_chain),
         )
 
     normalized_body = body.lower()
@@ -148,6 +152,7 @@ def _check_streamlit_access_once(
             final_url=final_url,
             auth_wall_redirect=False,
             reason="ok",
+            redirect_chain=tuple(redirect_chain),
         )
 
     return AccessCheckResult(
@@ -156,6 +161,7 @@ def _check_streamlit_access_once(
         final_url=final_url,
         auth_wall_redirect=False,
         reason="unexpected_response",
+        redirect_chain=tuple(redirect_chain),
     )
 
 
