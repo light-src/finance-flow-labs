@@ -48,6 +48,10 @@ def resolve_view(
     return DEFAULT_VIEW, None
 
 
+def _should_render_access_status_banner(active_view: str) -> bool:
+    return active_view == "operator"
+
+
 def _render_access_status_banner() -> None:
     base_url = os.getenv("STREAMLIT_PUBLIC_URL")
     if not base_url:
@@ -97,7 +101,8 @@ def main() -> None:
     st.session_state[SESSION_KEY] = selected_view
     st.query_params["view"] = selected_view
 
-    _render_access_status_banner()
+    if _should_render_access_status_banner(selected_view):
+        _render_access_status_banner()
 
     if selected_view == "operator":
         run_streamlit_app(dsn, configure_page=False)

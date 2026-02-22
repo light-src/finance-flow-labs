@@ -33,3 +33,8 @@ def test_resolve_view_uses_session_state_when_query_missing():
 
     assert view == "operator"
     assert warning is None
+
+
+def test_access_banner_visibility_is_operator_only():
+    assert router._should_render_access_status_banner("operator") is True
+    assert router._should_render_access_status_banner("enduser") is False
