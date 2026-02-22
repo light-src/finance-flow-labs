@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 AUTH_WALL_HOST = "share.streamlit.io"
@@ -30,10 +30,16 @@ class AccessCheckResult:
         }
 
 
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
 def _default_fetch(url: str, timeout_seconds: float) -> tuple[int | None, str, Mapping[str, str], str]:
     request = Request(url=url, method="GET")
+    opener = build_opener(_NoRedirectHandler())
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with opener.open(request, timeout=timeout_seconds) as response:
             status_code = getattr(response, "status", None)
             final_url = response.geturl()
             headers = dict(response.headers.items())

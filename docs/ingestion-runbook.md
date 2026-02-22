@@ -125,7 +125,7 @@ Validation guardrails:
 
 ### Dashboard access contract smoke check
 
-Run from CI or post-deploy:
+Run from CI or post-deploy (automated by `.github/workflows/streamlit-access-contract.yml` every 30 minutes):
 
 ```bash
 python3 -m src.ingestion.cli streamlit-access-check --url https://finance-flow-labs.streamlit.app/
