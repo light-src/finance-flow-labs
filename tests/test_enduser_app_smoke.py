@@ -80,6 +80,50 @@ def test_run_enduser_app_renders_portfolio_and_signals_tabs(monkeypatch):
     assert calls["info"] == ["Coming soon", "More signal cards coming soon"]
 
 
+def test_run_enduser_app_wires_reader_payload_into_signal_card(monkeypatch):
+    calls: dict[str, object] = {"reader_dsn": None, "render_payload": None}
+
+    class _TabContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    fake_streamlit = types.SimpleNamespace(
+        set_page_config=lambda **_: None,
+        title=lambda *_: None,
+        caption=lambda *_: None,
+        tabs=lambda _labels: [_TabContext(), _TabContext()],
+        info=lambda *_: None,
+    )
+
+    monkeypatch.setitem(__import__("sys").modules, "streamlit", fake_streamlit)
+    app = importlib.import_module("src.enduser.app")
+
+    expected_payload = {
+        "status": "ok",
+        "regime": "risk_off",
+        "confidence": 0.61,
+        "as_of": "2026-02-22T21:30:00Z",
+    }
+
+    def _fake_reader(dsn: str):
+        calls["reader_dsn"] = dsn
+        return expected_payload
+
+    def _fake_render(*, regime_signal):
+        calls["render_payload"] = regime_signal
+
+    monkeypatch.setattr(app, "read_latest_macro_regime_signal", _fake_reader)
+    monkeypatch.setattr(app, "render_macro_regime_card", _fake_render)
+
+    app.run_enduser_app("postgres://macro-signal")
+
+    assert calls["reader_dsn"] == "postgres://macro-signal"
+    assert calls["render_payload"] == expected_payload
+
+
 def test_enduser_entrypoint_requires_database_url(monkeypatch):
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
