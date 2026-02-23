@@ -7,6 +7,50 @@ dashboard_app = importlib.import_module("src.dashboard.app")
 
 def test_dashboard_app_module_loads():
     assert hasattr(dashboard_app, "build_operator_cards")
+    assert hasattr(dashboard_app, "update_refresh_request_status")
+
+
+def test_dashboard_app_update_refresh_request_status_delegates_to_repository(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeRepository:
+        def __init__(self, dsn: str):
+            captured["dsn"] = dsn
+
+        def update_refresh_request_status(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"id": kwargs["request_id"], "status": kwargs["status"]}
+
+    class FakeModule:
+        PostgresRepository = FakeRepository
+
+    original_import_module = dashboard_app.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "src.ingestion.postgres_repository":
+            return FakeModule()
+        return original_import_module(name)
+
+    monkeypatch.setattr(dashboard_app.importlib, "import_module", fake_import_module)
+
+    row = dashboard_app.update_refresh_request_status(
+        "postgresql://demo",
+        request_id=123,
+        status="completed",
+        handler="operator-a",
+        result_message="manual run complete",
+        ingestion_run_id="run-20260223-01",
+    )
+
+    assert row == {"id": 123, "status": "completed"}
+    assert captured["dsn"] == "postgresql://demo"
+    assert captured["kwargs"] == {
+        "request_id": 123,
+        "status": "completed",
+        "handler": "operator-a",
+        "result_message": "manual run complete",
+        "ingestion_run_id": "run-20260223-01",
+    }
 
 
 def test_dashboard_app_kpi_layout_is_tiered_and_bounded():

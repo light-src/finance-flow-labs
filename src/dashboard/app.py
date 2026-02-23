@@ -406,6 +406,26 @@ def load_dashboard_view(dsn: str) -> dict[str, object]:
     return build_dashboard_view(repository)
 
 
+def update_refresh_request_status(
+    dsn: str,
+    *,
+    request_id: int,
+    status: str,
+    handler: str | None = None,
+    result_message: str | None = None,
+    ingestion_run_id: str | None = None,
+) -> dict[str, object] | None:
+    postgres_repository = importlib.import_module("src.ingestion.postgres_repository")
+    repository = postgres_repository.PostgresRepository(dsn=dsn)
+    return repository.update_refresh_request_status(
+        request_id=request_id,
+        status=status,
+        handler=handler,
+        result_message=result_message,
+        ingestion_run_id=ingestion_run_id,
+    )
+
+
 def run_streamlit_app(dsn: str, *, configure_page: bool = True) -> None:
     st = importlib.import_module("streamlit")
 
@@ -614,6 +634,54 @@ def run_streamlit_app(dsn: str, *, configure_page: bool = True) -> None:
     if isinstance(pending_refresh_requests, list) and pending_refresh_requests:
         st.subheader("Pending Refresh Requests")
         st.dataframe(pending_refresh_requests, use_container_width=True)
+
+        request_ids = [
+            int(row["id"])
+            for row in pending_refresh_requests
+            if isinstance(row, Mapping) and isinstance(row.get("id"), int)
+        ]
+        if request_ids:
+            with st.expander("Handle refresh request", expanded=False):
+                selected_request_id = st.selectbox(
+                    "request_id",
+                    request_ids,
+                    key="refresh_request_selected_id",
+                )
+                next_status = st.selectbox(
+                    "next_status",
+                    ["accepted", "running", "completed", "failed", "dismissed"],
+                    key="refresh_request_next_status",
+                )
+                handler = st.text_input("handler", value="operator", key="refresh_request_handler")
+                result_message = st.text_input(
+                    "result_message",
+                    value="",
+                    key="refresh_request_result_message",
+                    help="Optional outcome note for audit trail.",
+                )
+                ingestion_run_id = st.text_input(
+                    "ingestion_run_id",
+                    value="",
+                    key="refresh_request_ingestion_run_id",
+                    help="Optional run reference when linked ingestion execution exists.",
+                )
+
+                if st.button("Update refresh request status", key="refresh_request_update_button"):
+                    updated = update_refresh_request_status(
+                        dsn,
+                        request_id=int(selected_request_id),
+                        status=str(next_status),
+                        handler=(handler.strip() or None),
+                        result_message=(result_message.strip() or None),
+                        ingestion_run_id=(ingestion_run_id.strip() or None),
+                    )
+                    if isinstance(updated, Mapping):
+                        st.success(
+                            "Refresh request updated "
+                            f"(request_id={updated.get('id')}, status={updated.get('status')})."
+                        )
+                    else:
+                        st.error("Refresh request update failed. Verify request_id and database connectivity.")
     else:
         st.info("No pending refresh requests.")
 

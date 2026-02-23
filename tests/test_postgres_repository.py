@@ -691,3 +691,52 @@ def test_postgres_repository_reads_pending_refresh_requests():
     assert rows[0]["id"] == 102
     assert rows[0]["status"] == "pending"
     assert "FROM refresh_requests" in cursor.executed[0][0]
+
+
+def test_postgres_repository_updates_refresh_request_status():
+    cursor = FakeCursor(
+        fetch_one_rows=[
+            (
+                102,
+                "2026-02-23T02:31:00+00:00",
+                "macro_signal",
+                "enduser/signals",
+                "completed",
+                "enduser_session",
+                None,
+                "2026-02-23T02:40:00+00:00",
+                "operator",
+                "manual ingestion completed",
+                "run-1",
+            )
+        ],
+        columns=[
+            "id",
+            "requested_at",
+            "request_type",
+            "source_view",
+            "status",
+            "requested_by",
+            "note",
+            "handled_at",
+            "handler",
+            "result_message",
+            "ingestion_run_id",
+        ],
+    )
+    conn = FakeConnection(cursor)
+    repo = PostgresRepository(connection_factory=lambda: conn)
+
+    row = repo.update_refresh_request_status(
+        request_id=102,
+        status="completed",
+        handler="operator",
+        result_message="manual ingestion completed",
+        ingestion_run_id="run-1",
+    )
+
+    assert row is not None
+    assert row["id"] == 102
+    assert row["status"] == "completed"
+    assert "UPDATE refresh_requests" in cursor.executed[0][0]
+    assert conn.committed is True
