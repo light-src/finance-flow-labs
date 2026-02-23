@@ -10,6 +10,33 @@ _REGIME_META: dict[str, tuple[str, str]] = {
     "neutral": ("⚪", "Neutral"),
 }
 
+_READINESS_META: dict[str, tuple[str, str, str, str]] = {
+    "ready": (
+        "✅",
+        "READY",
+        "success",
+        "Signal is decision-grade. You can use this signal in thesis review with normal risk checks.",
+    ),
+    "stale": (
+        "🟠",
+        "STALE",
+        "warning",
+        "Signal is outdated. Defer new thesis execution until macro data is refreshed.",
+    ),
+    "missing": (
+        "⚪",
+        "MISSING",
+        "warning",
+        "No macro signal record is available. Do not execute thesis from this signal yet.",
+    ),
+    "error": (
+        "⛔",
+        "ERROR",
+        "error",
+        "Signal read failed or malformed. Block thesis execution until data integrity is restored.",
+    ),
+}
+
 
 def _normalize_as_of(value: object) -> str:
     if isinstance(value, datetime):
@@ -21,34 +48,57 @@ def _normalize_as_of(value: object) -> str:
     return "N/A"
 
 
-def render_macro_regime_card(regime_signal: dict[str, Any] | None) -> None:
-    st = importlib.import_module("streamlit")
+def _to_readiness(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized in {"ok", "ready"}:
+        return "ready"
+    if normalized in {"stale", "missing", "error"}:
+        return normalized
+    return "error"
 
-    st.subheader("Macro regime signal")
 
-    if not regime_signal:
-        st.info("No macro regime signal yet. Analysis pipeline data is pending.")
-        st.caption("next_action: run macro-analysis ingestion and refresh Signals tab")
-        return
+def _emit_state(st: Any, readiness: str, *, message: str | None) -> None:
+    icon, label, level, implication = _READINESS_META[readiness]
+    content = [
+        f"{icon} **Readiness: {label}**",
+        implication,
+        "",
+        f"What happened: {message or 'No additional details provided.'}",
+    ]
+    text = "\n".join(content)
+    if level == "success":
+        st.success(text)
+    elif level == "warning":
+        st.warning(text)
+    else:
+        st.error(text)
 
-    status = str(regime_signal.get("status", "ok")).strip().lower()
-    if status in {"missing", "error"}:
-        message = str(regime_signal.get("message") or "Macro regime signal unavailable.")
-        st.warning(f"[{status}] {message}")
-        if status == "missing":
-            st.caption("next_action: seed at least one macro regime row, then reload")
-        else:
-            st.caption("next_action: inspect malformed row/DB connectivity and rerun")
-        return
 
-    if status == "stale":
-        message = str(
-            regime_signal.get("message")
-            or "Signal is stale. Review ingestion pipeline before using this for decisions."
-        )
-        st.warning(f"[stale] {message}")
-        st.caption("next_action: rerun macro-analysis pipeline to refresh as_of")
+def _render_freshness_and_lineage(st: Any, regime_signal: dict[str, Any]) -> None:
+    st.write("Data freshness & lineage")
+    st.caption(f"as_of: {_normalize_as_of(regime_signal.get('as_of'))}")
 
+    freshness_days = regime_signal.get("freshness_days")
+    if freshness_days is not None:
+        st.caption(f"freshness_threshold_days: {freshness_days}")
+
+    lineage_id = regime_signal.get("lineage_id")
+    if lineage_id:
+        st.caption(f"lineage_id: {lineage_id}")
+
+    source_tags = regime_signal.get("source_tags")
+    if source_tags:
+        tags = ", ".join(str(tag) for tag in source_tags if str(tag).strip())
+        if tags:
+            st.caption(f"source_tags: {tags}")
+
+
+def _render_refresh_cta(st: Any) -> None:
+    if st.button("Request data refresh", key="macro_regime_refresh_request"):
+        st.info("Refresh request recorded. Data operator/pipeline will pick this up in the next cycle.")
+
+
+def _render_signal_body(st: Any, regime_signal: dict[str, Any]) -> None:
     regime_key = str(regime_signal.get("regime", "neutral")).strip().lower().replace("-", "_")
     emoji, regime_label = _REGIME_META.get(regime_key, _REGIME_META["neutral"])
 
@@ -61,16 +111,6 @@ def render_macro_regime_card(regime_signal: dict[str, Any] | None) -> None:
     drivers = [str(item) for item in regime_signal.get("drivers", []) if str(item).strip()][:3]
 
     st.markdown(f"### {emoji} {regime_label}")
-    st.caption(f"as_of: {_normalize_as_of(regime_signal.get('as_of'))}")
-    if regime_signal.get("lineage_id"):
-        st.caption(f"lineage_id: {regime_signal.get('lineage_id')}")
-    if regime_signal.get("source_tags"):
-        tags = ", ".join(str(tag) for tag in regime_signal.get("source_tags", []) if str(tag).strip())
-        st.caption(f"source_tags: {tags}")
-    freshness_days = regime_signal.get("freshness_days")
-    if freshness_days is not None:
-        st.caption(f"freshness_policy: stale after {freshness_days}d")
-
     st.write(f"신뢰도: {confidence * 100:.0f}%")
     st.progress(confidence)
 
@@ -97,3 +137,25 @@ def render_macro_regime_card(regime_signal: dict[str, Any] | None) -> None:
             st.write(f"• {item}")
     else:
         st.write("• 없음")
+
+
+def render_macro_regime_card(regime_signal: dict[str, Any] | None) -> None:
+    st = importlib.import_module("streamlit")
+
+    st.subheader("Macro regime signal")
+
+    if not regime_signal:
+        regime_signal = {
+            "status": "missing",
+            "message": "No macro regime signal yet. Analysis pipeline data is pending.",
+        }
+
+    readiness = _to_readiness(str(regime_signal.get("status", "error")))
+    _emit_state(st, readiness, message=str(regime_signal.get("message") or "").strip() or None)
+    _render_freshness_and_lineage(st, regime_signal)
+
+    if readiness != "ready":
+        _render_refresh_cta(st)
+        return
+
+    _render_signal_body(st, regime_signal)

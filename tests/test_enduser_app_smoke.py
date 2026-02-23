@@ -56,6 +56,9 @@ def test_run_enduser_app_renders_portfolio_and_signals_tabs(monkeypatch):
         write=write,
         progress=progress,
         warning=lambda text: calls.setdefault("warning", []).append(text),
+        success=lambda text: calls.setdefault("success", []).append(text),
+        error=lambda text: calls.setdefault("error", []).append(text),
+        button=lambda *_args, **_kwargs: False,
     )
 
     monkeypatch.setitem(__import__("sys").modules, "streamlit", fake_streamlit)
@@ -96,6 +99,14 @@ def test_run_enduser_app_wires_reader_payload_into_signal_card(monkeypatch):
         caption=lambda *_: None,
         tabs=lambda _labels: [_TabContext(), _TabContext()],
         info=lambda *_: None,
+        subheader=lambda *_: None,
+        success=lambda *_: None,
+        warning=lambda *_: None,
+        error=lambda *_: None,
+        write=lambda *_: None,
+        markdown=lambda *_: None,
+        progress=lambda *_: None,
+        button=lambda *_args, **_kwargs: False,
     )
 
     monkeypatch.setitem(__import__("sys").modules, "streamlit", fake_streamlit)
