@@ -740,3 +740,60 @@ def test_postgres_repository_updates_refresh_request_status():
     assert row["status"] == "completed"
     assert "UPDATE refresh_requests" in cursor.executed[0][0]
     assert conn.committed is True
+
+
+def test_postgres_repository_writes_portfolio_snapshot_and_returns_id():
+    cursor = FakeCursor(fetch_one_rows=[(501,)])
+    conn = FakeConnection(cursor)
+    repo = PostgresRepository(connection_factory=lambda: conn)
+
+    snapshot_id = repo.write_portfolio_snapshot(
+        {
+            "as_of": "2026-02-23",
+            "nav": 1000,
+            "us_weight": 0.4,
+            "kr_weight": 0.2,
+            "crypto_weight": 0.3,
+            "leverage_weight": 0.1,
+        }
+    )
+
+    assert snapshot_id == 501
+    assert "INSERT INTO portfolio_snapshots" in cursor.executed[0][0]
+    assert "ON CONFLICT (as_of) DO UPDATE" in cursor.executed[0][0]
+    assert conn.committed is True
+
+
+def test_postgres_repository_reads_portfolio_snapshots():
+    cursor = FakeCursor(
+        fetch_rows=[
+            (
+                501,
+                "2026-02-23",
+                1015.0,
+                0.4,
+                0.2,
+                0.3,
+                0.1,
+                "2026-02-23T00:00:00+00:00",
+            )
+        ],
+        columns=[
+            "id",
+            "as_of",
+            "nav",
+            "us_weight",
+            "kr_weight",
+            "crypto_weight",
+            "leverage_weight",
+            "created_at",
+        ],
+    )
+    conn = FakeConnection(cursor)
+    repo = PostgresRepository(connection_factory=lambda: conn)
+
+    rows = repo.read_portfolio_snapshots(limit=15)
+
+    assert rows[0]["id"] == 501
+    assert rows[0]["nav"] == 1015.0
+    assert "FROM portfolio_snapshots" in cursor.executed[0][0]

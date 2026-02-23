@@ -26,6 +26,14 @@ def build_parser() -> argparse.ArgumentParser:
     _ = run_update.add_argument("--source", required=True)
     _ = run_update.add_argument("--entity")
 
+    portfolio_snapshot_create = subparsers.add_parser("portfolio-snapshot-create")
+    _ = portfolio_snapshot_create.add_argument("--as-of", required=True)
+    _ = portfolio_snapshot_create.add_argument("--nav", required=True, type=float)
+    _ = portfolio_snapshot_create.add_argument("--us-weight", type=float)
+    _ = portfolio_snapshot_create.add_argument("--kr-weight", type=float)
+    _ = portfolio_snapshot_create.add_argument("--crypto-weight", type=float)
+    _ = portfolio_snapshot_create.add_argument("--leverage-weight", type=float)
+
     expected_vs_realized = subparsers.add_parser("expected-vs-realized")
     _ = expected_vs_realized.add_argument("--horizon", default="1M")
     _ = expected_vs_realized.add_argument("--limit", type=int, default=50)
@@ -137,6 +145,15 @@ def _parse_iso_datetime(raw: str, field_name: str) -> datetime:
     return dt
 
 
+def _parse_iso_date(raw: str, field_name: str) -> str:
+    normalized = raw.strip()
+    try:
+        parsed = datetime.fromisoformat(normalized).date()
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be ISO-8601 date (YYYY-MM-DD)") from exc
+    return parsed.isoformat()
+
+
 def run_update_command(source: str, entity: Optional[str] = None) -> dict[str, object]:
     manual_runner = importlib.import_module("src.ingestion.manual_runner")
     run_manual_update = manual_runner.run_manual_update
@@ -170,6 +187,50 @@ def run_update_command(source: str, entity: Optional[str] = None) -> dict[str, o
         run_history_repository=run_history_repository,
     )
     return summary
+
+
+def create_portfolio_snapshot_command(
+    as_of: str,
+    nav: float,
+    us_weight: Optional[float] = None,
+    kr_weight: Optional[float] = None,
+    crypto_weight: Optional[float] = None,
+    leverage_weight: Optional[float] = None,
+) -> dict[str, object]:
+    dsn = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
+    if not dsn:
+        raise ValueError("SUPABASE_DB_URL or DATABASE_URL is required")
+    if nav <= 0:
+        raise ValueError("nav must be > 0")
+
+    for field_name, value in [
+        ("us_weight", us_weight),
+        ("kr_weight", kr_weight),
+        ("crypto_weight", crypto_weight),
+        ("leverage_weight", leverage_weight),
+    ]:
+        if value is None:
+            continue
+        if not (0 <= value <= 1):
+            raise ValueError(f"{field_name} must be between 0 and 1")
+
+    repository = PostgresRepository(dsn=dsn)
+    snapshot_id = repository.write_portfolio_snapshot(
+        {
+            "as_of": _parse_iso_date(as_of, "as_of"),
+            "nav": nav,
+            "us_weight": us_weight,
+            "kr_weight": kr_weight,
+            "crypto_weight": crypto_weight,
+            "leverage_weight": leverage_weight,
+        }
+    )
+
+    return {
+        "id": snapshot_id,
+        "as_of": _parse_iso_date(as_of, "as_of"),
+        "nav": nav,
+    }
 
 
 def read_expected_vs_realized_command(horizon: str = "1M", limit: int = 50) -> list[dict[str, object]]:
@@ -422,6 +483,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == "run-update":
         summary = run_update_command(args.source, args.entity)
         print(json.dumps(summary))
+        return 0
+
+    if args.command == "portfolio-snapshot-create":
+        summary = create_portfolio_snapshot_command(
+            as_of=args.as_of,
+            nav=args.nav,
+            us_weight=args.us_weight,
+            kr_weight=args.kr_weight,
+            crypto_weight=args.crypto_weight,
+            leverage_weight=args.leverage_weight,
+        )
+        print(json.dumps(summary, default=str))
         return 0
 
     if args.command == "expected-vs-realized":

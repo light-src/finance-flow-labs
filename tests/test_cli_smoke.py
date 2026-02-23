@@ -14,6 +14,80 @@ def test_cli_exposes_manual_update_command():
     assert args.source == "sec_edgar"
 
 
+def test_cli_exposes_portfolio_snapshot_create_command():
+    parser = cli.build_parser()
+    args = parser.parse_args(
+        [
+            "portfolio-snapshot-create",
+            "--as-of",
+            "2026-02-23",
+            "--nav",
+            "1000",
+            "--us-weight",
+            "0.4",
+            "--kr-weight",
+            "0.2",
+            "--crypto-weight",
+            "0.3",
+            "--leverage-weight",
+            "0.1",
+        ]
+    )
+
+    assert args.command == "portfolio-snapshot-create"
+    assert args.as_of == "2026-02-23"
+    assert args.nav == 1000.0
+    assert args.us_weight == 0.4
+
+
+def test_create_portfolio_snapshot_command_requires_database_url(monkeypatch):
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ValueError):
+        cli.create_portfolio_snapshot_command(as_of="2026-02-23", nav=1000)
+
+
+def test_create_portfolio_snapshot_command_uses_postgres_repository(monkeypatch):
+    class FakeRepository:
+        def __init__(self, dsn: str) -> None:
+            self.dsn = dsn
+
+        def write_portfolio_snapshot(self, payload):
+            assert payload["as_of"] == "2026-02-23"
+            assert payload["nav"] == 1000
+            assert payload["us_weight"] == 0.4
+            assert payload["kr_weight"] == 0.2
+            assert payload["crypto_weight"] == 0.3
+            assert payload["leverage_weight"] == 0.1
+            return 301
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://example")
+    monkeypatch.setattr(cli, "PostgresRepository", FakeRepository)
+
+    row = cli.create_portfolio_snapshot_command(
+        as_of="2026-02-23",
+        nav=1000,
+        us_weight=0.4,
+        kr_weight=0.2,
+        crypto_weight=0.3,
+        leverage_weight=0.1,
+    )
+
+    assert row == {"id": 301, "as_of": "2026-02-23", "nav": 1000}
+
+
+def test_create_portfolio_snapshot_command_rejects_weight_out_of_range(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgres://example")
+
+    with pytest.raises(ValueError, match="us_weight"):
+        cli.create_portfolio_snapshot_command(
+            as_of="2026-02-23",
+            nav=1000,
+            us_weight=1.1,
+        )
+
+
 def test_cli_exposes_expected_vs_realized_command_with_defaults():
     parser = cli.build_parser()
     args = parser.parse_args(["expected-vs-realized"])
