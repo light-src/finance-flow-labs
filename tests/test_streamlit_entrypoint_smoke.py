@@ -42,12 +42,35 @@ def test_main_defaults_to_enduser_view(monkeypatch):
     assert banner_calls == ["called"]
 
 
-def test_main_supports_operator_deep_link(monkeypatch):
+def test_main_operator_deep_link_falls_back_when_operator_disabled(monkeypatch):
     fake_st = FakeStreamlit(query_params={"view": "operator"}, session_state={})
     calls: list[tuple[str, bool]] = []
     banner_calls: list[str] = []
 
     monkeypatch.setenv("DATABASE_URL", "postgres://example")
+    monkeypatch.delenv("ENABLE_OPERATOR_VIEW", raising=False)
+    monkeypatch.setattr(router, "st", fake_st)
+    monkeypatch.setattr(router, "_render_view_toggle", lambda active_view: active_view)
+    monkeypatch.setattr(router, "_render_access_status_banner", lambda: banner_calls.append("called"))
+    monkeypatch.setattr(router, "run_enduser_app", lambda dsn, configure_page=False: calls.append(("enduser", configure_page)))
+    monkeypatch.setattr(router, "run_streamlit_app", lambda dsn, configure_page=False: calls.append(("operator", configure_page)))
+
+    router.main()
+
+    assert calls == [("enduser", False)]
+    assert fake_st.query_params["view"] == "enduser"
+    assert fake_st.warnings
+    assert "Operator view is disabled" in fake_st.warnings[0]
+    assert banner_calls == ["called"]
+
+
+def test_main_supports_operator_deep_link_when_enabled(monkeypatch):
+    fake_st = FakeStreamlit(query_params={"view": "operator"}, session_state={})
+    calls: list[tuple[str, bool]] = []
+    banner_calls: list[str] = []
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://example")
+    monkeypatch.setenv("ENABLE_OPERATOR_VIEW", "true")
     monkeypatch.setattr(router, "st", fake_st)
     monkeypatch.setattr(router, "_render_view_toggle", lambda active_view: active_view)
     monkeypatch.setattr(router, "_render_access_status_banner", lambda: banner_calls.append("called"))

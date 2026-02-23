@@ -1,16 +1,17 @@
 # Streamlit View Routing
 
-Primary deployment entrypoint is `streamlit_app.py` and now supports two explicit views:
+Primary deployment entrypoint is `streamlit_app.py` and supports two explicit views:
 
 - `?view=enduser` (default): investor-facing workspace (`Portfolio`, `Signals`)
-- `?view=operator`: ingestion/policy operator dashboard
+- `?view=operator`: ingestion/policy operator dashboard (**only when `ENABLE_OPERATOR_VIEW=true`**)
 
 ## Behavior
 
 1. If `view` query param is provided and valid, it is used.
-2. If `view` is missing, the app restores the last view stored in Streamlit session state.
-3. If `view` is invalid, app falls back to `enduser` and shows a warning.
-4. In-app radio toggle keeps both surfaces one-click reachable.
+2. If `view=operator` is requested while `ENABLE_OPERATOR_VIEW` is disabled, app falls back to `enduser` and shows an operator-only warning.
+3. If `view` is missing, the app restores the last view stored in Streamlit session state (operator session is also downgraded to enduser when operator mode is disabled).
+4. If `view` is invalid, app falls back to `enduser` and shows a warning.
+5. In-app workspace radio toggle is rendered only when `ENABLE_OPERATOR_VIEW=true`.
 
 ## Access status banner
 

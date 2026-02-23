@@ -14,6 +14,7 @@ LOGGER = logging.getLogger(__name__)
 VALID_VIEWS = {"enduser", "operator"}
 DEFAULT_VIEW = "enduser"
 SESSION_KEY = "ffl_view"
+OPERATOR_VIEW_ENV = "ENABLE_OPERATOR_VIEW"
 
 
 def _query_param_to_text(raw_value: object) -> str:
@@ -29,9 +30,16 @@ def _normalize_view(raw_value: object) -> str:
     return DEFAULT_VIEW
 
 
+def _is_operator_view_enabled() -> bool:
+    raw = str(os.getenv(OPERATOR_VIEW_ENV, "")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def resolve_view(
     query_params: Mapping[str, object],
     session_state: Mapping[str, object],
+    *,
+    operator_enabled: bool,
 ) -> tuple[str, str | None]:
     requested = query_params.get("view")
     if requested is not None:
@@ -39,10 +47,14 @@ def resolve_view(
         normalized = _normalize_view(requested)
         if requested_text and requested_text not in VALID_VIEWS:
             return normalized, f"Unknown view '{requested_text}'. Falling back to '{DEFAULT_VIEW}'."
+        if normalized == "operator" and not operator_enabled:
+            return DEFAULT_VIEW, "Operator view is disabled. Set ENABLE_OPERATOR_VIEW=true to enable it."
         return normalized, None
 
     current = session_state.get(SESSION_KEY)
     if current in VALID_VIEWS:
+        if current == "operator" and not operator_enabled:
+            return DEFAULT_VIEW, "Operator view is disabled. Set ENABLE_OPERATOR_VIEW=true to enable it."
         return str(current), None
 
     return DEFAULT_VIEW, None
@@ -105,7 +117,12 @@ def main() -> None:
     if not dsn:
         raise ValueError("SUPABASE_DB_URL or DATABASE_URL is required")
 
-    view, warning_message = resolve_view(st.query_params, st.session_state)
+    operator_enabled = _is_operator_view_enabled()
+    view, warning_message = resolve_view(
+        st.query_params,
+        st.session_state,
+        operator_enabled=operator_enabled,
+    )
 
     st.set_page_config(page_title="finance-flow-labs", layout="wide")
 
@@ -113,7 +130,9 @@ def main() -> None:
         LOGGER.warning(warning_message)
         st.warning(warning_message)
 
-    selected_view = _render_view_toggle(view)
+    selected_view = view
+    if operator_enabled:
+        selected_view = _render_view_toggle(view)
     st.session_state[SESSION_KEY] = selected_view
     st.query_params["view"] = selected_view
 
