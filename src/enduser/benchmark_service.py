@@ -44,10 +44,19 @@ def _load_weights() -> dict[str, float]:
         if raw is None or raw.strip() == "":
             continue
         try:
-            weights[key] = float(raw)
+            parsed = float(raw)
         except ValueError:
             continue
-    return weights
+        if parsed < 0:
+            continue
+        weights[key] = parsed
+
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        return dict(DEFAULT_BENCHMARK_WEIGHTS)
+
+    # Keep benchmark return scale stable even when env overrides are partially set.
+    return {key: value / total_weight for key, value in weights.items()}
 
 
 def _build_daily_levels(repository: object, metric_key: str) -> dict[date, float]:

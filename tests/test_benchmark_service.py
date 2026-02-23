@@ -110,3 +110,71 @@ def test_compute_benchmark_series_skips_when_component_series_missing():
 
     rows = compute_benchmark_series(repo, "2026-02-19", "2026-02-20")
     assert rows == []
+
+
+def test_compute_benchmark_series_normalizes_partial_env_weights(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_WEIGHT_QQQ", "0.45")
+    monkeypatch.setenv("BENCHMARK_WEIGHT_KOSPI200", "0.25")
+    monkeypatch.setenv("BENCHMARK_WEIGHT_BTC", "0.20")
+    monkeypatch.setenv("BENCHMARK_WEIGHT_SGOV", "0")
+
+    repo = FakeBenchmarkRepository(
+        {
+            "QQQ": [
+                {"as_of": "2026-02-20", "value": 110.0},
+                {"as_of": "2026-02-19", "value": 100.0},
+            ],
+            "KOSPI200": [
+                {"as_of": "2026-02-20", "value": 110.0},
+                {"as_of": "2026-02-19", "value": 100.0},
+            ],
+            "BTC": [
+                {"as_of": "2026-02-20", "value": 110.0},
+                {"as_of": "2026-02-19", "value": 100.0},
+            ],
+            "SGOV": [
+                {"as_of": "2026-02-20", "value": 200.0},
+                {"as_of": "2026-02-19", "value": 100.0},
+            ],
+        }
+    )
+
+    rows = compute_benchmark_series(repo, "2026-02-19", "2026-02-20")
+    assert len(rows) == 1
+    # QQQ/KOSPI/BTC all +10%, SGOV zero weight after normalization.
+    assert math.isclose(rows[0]["benchmark_return"], 0.10, rel_tol=1e-12)
+
+
+def test_compute_benchmark_series_ignores_negative_weight_overrides(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_WEIGHT_QQQ", "-1")
+
+    repo = FakeBenchmarkRepository(
+        {
+            "QQQ": [
+                {"as_of": "2026-02-20", "value": 101.0},
+                {"as_of": "2026-02-19", "value": 100.0},
+            ],
+            "KOSPI200": [
+                {"as_of": "2026-02-20", "value": 201.0},
+                {"as_of": "2026-02-19", "value": 200.0},
+            ],
+            "BTC": [
+                {"as_of": "2026-02-20", "value": 51000.0},
+                {"as_of": "2026-02-19", "value": 50000.0},
+            ],
+            "SGOV": [
+                {"as_of": "2026-02-20", "value": 100.2},
+                {"as_of": "2026-02-19", "value": 100.0},
+            ],
+        }
+    )
+
+    rows = compute_benchmark_series(repo, "2026-02-19", "2026-02-20")
+    expected_return = (
+        0.45 * (101.0 / 100.0 - 1.0)
+        + 0.25 * (201.0 / 200.0 - 1.0)
+        + 0.20 * (51000.0 / 50000.0 - 1.0)
+        + 0.10 * (100.2 / 100.0 - 1.0)
+    )
+    assert len(rows) == 1
+    assert math.isclose(rows[0]["benchmark_return"], expected_return, rel_tol=1e-12)
