@@ -863,6 +863,12 @@ def build_dashboard_view(
                 attribution_summary["evidence_gap_count"] = evidence_gap_count
                 attribution_summary["evidence_gap_coverage"] = evidence_gap_count / valid_rows
 
+    pending_refresh_requests: list[dict[str, object]] = []
+    if hasattr(repository, "read_pending_refresh_requests"):
+        pending_rows = _safe_repo_call([], repository.read_pending_refresh_requests, limit=50)
+        if isinstance(pending_rows, list):
+            pending_refresh_requests = [row for row in pending_rows if isinstance(row, dict)]
+
     if isinstance(recent_runs, list) and recent_runs:
         latest = recent_runs[0]
         if isinstance(latest, dict):
@@ -896,5 +902,6 @@ def build_dashboard_view(
             latest_run_time=last_run_time or None,
         ),
         "deployed_access": _load_deployed_access_status(),
+        "pending_refresh_requests": pending_refresh_requests,
         "recent_runs": recent_runs,
     }

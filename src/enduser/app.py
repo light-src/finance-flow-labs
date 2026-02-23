@@ -21,5 +21,5 @@ def run_enduser_app(dsn: str, *, configure_page: bool = True) -> None:
 
     with signals_tab:
         regime_signal = read_latest_macro_regime_signal(dsn)
-        render_macro_regime_card(regime_signal=regime_signal)
+        render_macro_regime_card(regime_signal=regime_signal, dsn=dsn)
         st.info("More signal cards coming soon")
