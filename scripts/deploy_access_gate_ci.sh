@@ -32,6 +32,20 @@ results: list[dict[str, object]] = []
 release_blocker = False
 first_blocker: dict[str, object] | None = None
 
+
+def _parse_payload(raw: str) -> dict[str, object] | None:
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+
 for label, route_url in routes:
     cmd = [
         "python3",
@@ -46,8 +60,38 @@ for label, route_url in routes:
     if login_path:
         cmd += ["--restricted-login-path", login_path]
 
-    proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    payload = json.loads(proc.stdout)
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+
+    payload = _parse_payload(proc.stdout)
+    if payload is None:
+        fallback_reason = f"deploy_access_gate_command_failed:{proc.returncode}"
+        payload = {
+            "url": route_url,
+            "deploy_access_mode": mode,
+            "restricted_login_path": login_path or None,
+            "access_check": {
+                "ok": False,
+                "status_code": None,
+                "final_url": route_url,
+                "auth_wall_redirect": False,
+                "reason": fallback_reason,
+                "alert": True,
+                "alert_severity": "critical",
+                "remediation_hint": (
+                    "deploy-access-gate returned non-JSON output; inspect stderr and "
+                    "CLI/runtime environment."
+                ),
+            },
+            "gate": {
+                "ok": False,
+                "mode": mode,
+                "release_blocker": True,
+                "reason": fallback_reason,
+                "severity": "critical",
+                "operator_message": proc.stderr.strip()
+                or "deploy-access-gate command failed without structured output.",
+            },
+        }
 
     access = payload.get("access_check", {})
     gate = payload.get("gate", {})
@@ -55,7 +99,19 @@ for label, route_url in routes:
     severity = str(gate.get("severity") or access.get("alert_severity") or "unknown")
     hint = str(gate.get("remediation_hint") or access.get("remediation_hint") or "")
     operator_message = str(gate.get("operator_message") or "")
+
     is_blocker = bool(gate.get("release_blocker"))
+    if proc.returncode not in {0, 2}:
+        is_blocker = True
+        if reason == "unknown":
+            reason = f"deploy_access_gate_exit_{proc.returncode}"
+        if severity == "unknown":
+            severity = "critical"
+        if not operator_message:
+            operator_message = (
+                proc.stderr.strip() or f"deploy-access-gate exited with code {proc.returncode}."
+            )
+
     release_blocker = release_blocker or is_blocker
     if is_blocker and first_blocker is None:
         first_blocker = {
@@ -64,10 +120,12 @@ for label, route_url in routes:
             "severity": severity,
             "operator_message": operator_message,
             "hint": hint,
+            "cli_exit_code": proc.returncode,
         }
 
     print(
-        f"[deploy-access-gate:{label}] mode={mode} release_blocker={is_blocker} reason={reason} severity={severity}"
+        f"[deploy-access-gate:{label}] mode={mode} exit_code={proc.returncode} "
+        f"release_blocker={is_blocker} reason={reason} severity={severity}"
     )
     if operator_message:
         print(f"[deploy-access-gate:{label}] operator_message={operator_message}")
@@ -78,6 +136,7 @@ for label, route_url in routes:
         {
             "route": label,
             "url": route_url,
+            "cli_exit_code": proc.returncode,
             "release_blocker": is_blocker,
             "reason": reason,
             "severity": severity,
@@ -90,7 +149,7 @@ summary_lines = ["## Deploy Access Gate", f"- mode: `{mode}`", "- routes:"]
 for item in results:
     summary_lines.append(
         "  - "
-        + f"{item['route']}: blocker=`{str(item['release_blocker']).lower()}` "
+        + f"{item['route']}: exit_code=`{item['cli_exit_code']}` blocker=`{str(item['release_blocker']).lower()}` "
         + f"reason=`{item['reason']}` severity=`{item['severity']}`"
     )
     if item["operator_message"]:
@@ -104,6 +163,7 @@ if first_blocker:
         f"  - route: `{first_blocker['route']}`",
         f"  - reason: `{first_blocker['reason']}`",
         f"  - severity: `{first_blocker['severity']}`",
+        f"  - cli_exit_code: `{first_blocker['cli_exit_code']}`",
     ]
     if first_blocker["operator_message"]:
         summary_lines.append(f"  - operator_message: {first_blocker['operator_message']}")
