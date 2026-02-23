@@ -1062,6 +1062,68 @@ class PostgresRepository:
             return None
         return dict(zip(columns, row))
 
+    def write_portfolio_snapshot(self, snapshot: Mapping[str, object]) -> int:
+        conn: ConnectionProtocol = self._connect()
+        cursor: CursorProtocol = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO portfolio_snapshots(
+                as_of,
+                nav,
+                us_weight,
+                kr_weight,
+                crypto_weight,
+                leverage_weight
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (as_of) DO UPDATE SET
+                nav = EXCLUDED.nav,
+                us_weight = EXCLUDED.us_weight,
+                kr_weight = EXCLUDED.kr_weight,
+                crypto_weight = EXCLUDED.crypto_weight,
+                leverage_weight = EXCLUDED.leverage_weight
+            RETURNING id
+            """,
+            (
+                snapshot["as_of"],
+                snapshot["nav"],
+                snapshot.get("us_weight"),
+                snapshot.get("kr_weight"),
+                snapshot.get("crypto_weight"),
+                snapshot.get("leverage_weight"),
+            ),
+        )
+        row = cursor.fetchone() or (0,)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return int(row[0])
+
+    def read_portfolio_snapshots(self, limit: int = 30) -> list[dict[str, object]]:
+        conn: ConnectionProtocol = self._connect()
+        cursor: CursorProtocol = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                id,
+                as_of,
+                nav,
+                us_weight,
+                kr_weight,
+                crypto_weight,
+                leverage_weight,
+                created_at
+            FROM portfolio_snapshots
+            ORDER BY as_of DESC, created_at DESC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        cursor.close()
+        conn.close()
+        return [dict(zip(columns, row)) for row in rows]
+
     def create_refresh_request(
         self,
         *,
