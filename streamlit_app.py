@@ -82,20 +82,6 @@ def _render_access_status_banner() -> None:
     st.info(f"Remediation: {remediation}")
 
 
-def _render_view_toggle(active_view: str) -> str:
-    labels = ["End-user", "Operator"]
-    index = 0 if active_view == "enduser" else 1
-    selected = st.radio(
-        "Workspace",
-        labels,
-        index=index,
-        horizontal=True,
-        key="ffl_workspace_toggle",
-        help="Default landing is End-user. Operator is available for ingestion and policy diagnostics.",
-    )
-    return "enduser" if selected == "End-user" else "operator"
-
-
 def _run_view_app(app_fn: Callable[..., None], dsn: str) -> None:
     """Invoke view app without duplicate page config, with legacy compatibility.
 
@@ -131,10 +117,11 @@ def main() -> None:
         st.warning(warning_message)
 
     selected_view = view
-    if operator_enabled:
-        selected_view = _render_view_toggle(view)
     st.session_state[SESSION_KEY] = selected_view
-    st.query_params["view"] = selected_view
+    if selected_view == "operator":
+        st.query_params["view"] = "operator"
+    elif "view" in st.query_params:
+        del st.query_params["view"]
 
     if _should_render_access_status_banner(selected_view):
         _render_access_status_banner()
