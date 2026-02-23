@@ -1062,5 +1062,162 @@ class PostgresRepository:
             return None
         return dict(zip(columns, row))
 
+    def create_refresh_request(
+        self,
+        *,
+        request_type: str,
+        source_view: str,
+        requested_by: str,
+        note: str | None = None,
+        cooldown_minutes: int = 10,
+    ) -> dict[str, object]:
+        conn: ConnectionProtocol = self._connect()
+        cursor: CursorProtocol = conn.cursor()
+        cooldown_minutes = max(1, int(cooldown_minutes))
+        try:
+            cursor.execute(
+                """
+                WITH recent_pending AS (
+                    SELECT id
+                    FROM refresh_requests
+                    WHERE request_type = %s
+                      AND requested_by = %s
+                      AND status IN ('pending', 'accepted', 'running')
+                      AND requested_at >= (NOW() - (%s * INTERVAL '1 minute'))
+                    ORDER BY requested_at DESC
+                    LIMIT 1
+                ), inserted AS (
+                    INSERT INTO refresh_requests(
+                        request_type,
+                        source_view,
+                        status,
+                        requested_by,
+                        note
+                    )
+                    SELECT %s, %s, 'pending', %s, %s
+                    WHERE NOT EXISTS (SELECT 1 FROM recent_pending)
+                    RETURNING id, requested_at, request_type, source_view, status, requested_by, note, handled_at, handler, result_message, ingestion_run_id
+                )
+                SELECT
+                    id,
+                    requested_at,
+                    request_type,
+                    source_view,
+                    status,
+                    requested_by,
+                    note,
+                    handled_at,
+                    handler,
+                    result_message,
+                    ingestion_run_id,
+                    FALSE AS deduplicated
+                FROM inserted
+                UNION ALL
+                SELECT
+                    rr.id,
+                    rr.requested_at,
+                    rr.request_type,
+                    rr.source_view,
+                    rr.status,
+                    rr.requested_by,
+                    rr.note,
+                    rr.handled_at,
+                    rr.handler,
+                    rr.result_message,
+                    rr.ingestion_run_id,
+                    TRUE AS deduplicated
+                FROM refresh_requests rr
+                JOIN recent_pending rp ON rp.id = rr.id
+                LIMIT 1
+                """,
+                (
+                    request_type,
+                    requested_by,
+                    cooldown_minutes,
+                    request_type,
+                    source_view,
+                    requested_by,
+                    note,
+                ),
+            )
+            row = cursor.fetchone()
+            columns = [desc[0] for desc in cursor.description]
+            conn.commit()
+            if row is None:
+                raise RuntimeError("failed to create refresh request")
+            return dict(zip(columns, row))
+        finally:
+            cursor.close()
+            conn.close()
+
+    def read_pending_refresh_requests(self, limit: int = 20) -> list[dict[str, object]]:
+        conn: ConnectionProtocol = self._connect()
+        cursor: CursorProtocol = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    requested_at,
+                    request_type,
+                    source_view,
+                    status,
+                    requested_by,
+                    note,
+                    handled_at,
+                    handler,
+                    result_message,
+                    ingestion_run_id
+                FROM refresh_requests
+                WHERE status IN ('pending', 'accepted', 'running')
+                ORDER BY requested_at ASC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception:
+            return []
+        finally:
+            cursor.close()
+            conn.close()
+
+    def update_refresh_request_status(
+        self,
+        *,
+        request_id: int,
+        status: str,
+        handler: str | None = None,
+        result_message: str | None = None,
+        ingestion_run_id: str | None = None,
+    ) -> dict[str, object] | None:
+        conn: ConnectionProtocol = self._connect()
+        cursor: CursorProtocol = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                UPDATE refresh_requests
+                SET status = %s,
+                    handled_at = CASE WHEN %s IN ('completed', 'failed', 'dismissed') THEN NOW() ELSE handled_at END,
+                    handler = COALESCE(%s, handler),
+                    result_message = COALESCE(%s, result_message),
+                    ingestion_run_id = COALESCE(%s, ingestion_run_id)
+                WHERE id = %s
+                RETURNING id, requested_at, request_type, source_view, status, requested_by, note, handled_at, handler, result_message, ingestion_run_id
+                """,
+                (status, status, handler, result_message, ingestion_run_id, request_id),
+            )
+            row = cursor.fetchone()
+            columns = [desc[0] for desc in cursor.description]
+            conn.commit()
+            if row is None:
+                return None
+            return dict(zip(columns, row))
+        finally:
+            cursor.close()
+            conn.close()
+
     def snapshot_counts(self) -> dict[str, int]:
         return self.read_status_counters()

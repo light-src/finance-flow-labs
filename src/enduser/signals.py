@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 import importlib
+import os
+
+from src.enduser.refresh_requests import submit_macro_refresh_request
 
 _REGIME_META: dict[str, tuple[str, str]] = {
     "risk_on": ("🟢", "Risk-On"),
@@ -86,7 +89,11 @@ def _render_freshness_lineage(st: Any, regime_signal: dict[str, Any]) -> None:
             st.caption(f"source_tags: {tags}")
 
 
-def render_macro_regime_card(regime_signal: dict[str, Any] | None) -> None:
+def render_macro_regime_card(
+    regime_signal: dict[str, Any] | None,
+    *,
+    dsn: str | None = None,
+) -> None:
     st = importlib.import_module("streamlit")
 
     st.subheader("Macro regime signal")
@@ -152,4 +159,28 @@ def render_macro_regime_card(regime_signal: dict[str, Any] | None) -> None:
     if hasattr(st, "button"):
         requested = st.button("Request data refresh", key="macro_refresh_request")
         if requested:
-            st.info("Refresh request recorded. Operator can run a manual macro ingestion trigger.")
+            if not dsn:
+                st.warning("Refresh request could not be persisted (missing DB connection).")
+                return
+
+            requested_by = str(
+                os.getenv("ENDUSER_REQUESTER_ID")
+                or getattr(st, "session_state", {}).get("session_id")
+                or "enduser_session"
+            )
+            try:
+                result = submit_macro_refresh_request(dsn, requested_by=requested_by)
+            except Exception as exc:  # pragma: no cover - UI boundary
+                st.error(f"Refresh request failed: {exc}")
+                return
+
+            request_id = str(result.get("id", ""))
+            status = str(result.get("status", "pending"))
+            if bool(result.get("deduplicated")):
+                st.warning(
+                    f"Refresh request already pending within cooldown window (request_id={request_id}, status={status})."
+                )
+            else:
+                st.success(
+                    f"Refresh request submitted (request_id={request_id}, status={status}). Operator queue updated."
+                )

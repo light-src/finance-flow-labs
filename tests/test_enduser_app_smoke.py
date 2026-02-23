@@ -81,7 +81,7 @@ def test_run_enduser_app_renders_portfolio_and_signals_tabs(monkeypatch):
 
 
 def test_run_enduser_app_wires_reader_payload_into_signal_card(monkeypatch):
-    calls: dict[str, object] = {"reader_dsn": None, "render_payload": None}
+    calls: dict[str, object] = {"reader_dsn": None, "render_payload": None, "render_dsn": None}
 
     class _TabContext:
         def __enter__(self):
@@ -112,8 +112,9 @@ def test_run_enduser_app_wires_reader_payload_into_signal_card(monkeypatch):
         calls["reader_dsn"] = dsn
         return expected_payload
 
-    def _fake_render(*, regime_signal):
+    def _fake_render(*, regime_signal, dsn=None):
         calls["render_payload"] = regime_signal
+        calls["render_dsn"] = dsn
 
     monkeypatch.setattr(app, "read_latest_macro_regime_signal", _fake_reader)
     monkeypatch.setattr(app, "render_macro_regime_card", _fake_render)
@@ -122,6 +123,7 @@ def test_run_enduser_app_wires_reader_payload_into_signal_card(monkeypatch):
 
     assert calls["reader_dsn"] == "postgres://macro-signal"
     assert calls["render_payload"] == expected_payload
+    assert calls["render_dsn"] == "postgres://macro-signal"
 
 
 def test_enduser_entrypoint_requires_database_url(monkeypatch):

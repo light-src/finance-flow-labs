@@ -105,15 +105,26 @@ def test_render_macro_regime_card_stale_state(monkeypatch):
 def test_render_macro_regime_card_error_state_and_refresh_hook(monkeypatch):
     signals, calls = _load_signals_with_fake_streamlit(monkeypatch, button_return=True)
 
+    monkeypatch.setattr(
+        signals,
+        "submit_macro_refresh_request",
+        lambda _dsn, requested_by: {
+            "id": 101,
+            "status": "pending",
+            "deduplicated": False,
+        },
+    )
+
     signals.render_macro_regime_card(
         {
             "status": "error",
             "message": "Latest macro regime row is malformed.",
             "freshness_days": 7,
-        }
+        },
+        dsn="postgres://example",
     )
 
     assert "### 🛑 ERROR" in calls["markdown"]
     assert "Latest macro regime row is malformed." in calls["error"]
     assert any("Block signal-based investment action" in text for text in calls["error"])
-    assert any("Refresh request recorded." in text for text in calls["info"])
+    assert any("request_id=101" in text for text in calls["success"])

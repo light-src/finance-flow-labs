@@ -601,3 +601,93 @@ def test_postgres_repository_learning_reads_fallback_when_tables_missing():
     assert repo.read_forecast_error_attributions(horizon="1M", limit=10) == []
     assert repo.read_expected_vs_realized(horizon="1M", limit=10) == []
     assert repo.read_forecast_error_category_stats(horizon="1M", limit=10) == []
+
+
+def test_postgres_repository_create_refresh_request_handles_dedup_and_returns_row():
+    cursor = FakeCursor(
+        fetch_one_rows=[
+            (
+                101,
+                "2026-02-23T02:30:00+00:00",
+                "macro_signal",
+                "enduser/signals",
+                "pending",
+                "enduser_session",
+                None,
+                None,
+                None,
+                None,
+                None,
+                False,
+            )
+        ],
+        columns=[
+            "id",
+            "requested_at",
+            "request_type",
+            "source_view",
+            "status",
+            "requested_by",
+            "note",
+            "handled_at",
+            "handler",
+            "result_message",
+            "ingestion_run_id",
+            "deduplicated",
+        ],
+    )
+    conn = FakeConnection(cursor)
+    repo = PostgresRepository(connection_factory=lambda: conn)
+
+    row = repo.create_refresh_request(
+        request_type="macro_signal",
+        source_view="enduser/signals",
+        requested_by="enduser_session",
+        cooldown_minutes=10,
+    )
+
+    assert row["id"] == 101
+    assert row["deduplicated"] is False
+    assert "WITH recent_pending AS" in cursor.executed[0][0]
+    assert conn.committed is True
+
+
+def test_postgres_repository_reads_pending_refresh_requests():
+    cursor = FakeCursor(
+        fetch_rows=[
+            (
+                102,
+                "2026-02-23T02:31:00+00:00",
+                "macro_signal",
+                "enduser/signals",
+                "pending",
+                "enduser_session",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        ],
+        columns=[
+            "id",
+            "requested_at",
+            "request_type",
+            "source_view",
+            "status",
+            "requested_by",
+            "note",
+            "handled_at",
+            "handler",
+            "result_message",
+            "ingestion_run_id",
+        ],
+    )
+    conn = FakeConnection(cursor)
+    repo = PostgresRepository(connection_factory=lambda: conn)
+
+    rows = repo.read_pending_refresh_requests(limit=15)
+
+    assert rows[0]["id"] == 102
+    assert rows[0]["status"] == "pending"
+    assert "FROM refresh_requests" in cursor.executed[0][0]

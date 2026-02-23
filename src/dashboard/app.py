@@ -610,6 +610,13 @@ def run_streamlit_app(dsn: str, *, configure_page: bool = True) -> None:
         else:
             st.info("No attribution evidence gaps detected in recent 1M rows.")
 
+    pending_refresh_requests = view.get("pending_refresh_requests", [])
+    if isinstance(pending_refresh_requests, list) and pending_refresh_requests:
+        st.subheader("Pending Refresh Requests")
+        st.dataframe(pending_refresh_requests, use_container_width=True)
+    else:
+        st.info("No pending refresh requests.")
+
     recent_runs = view.get("recent_runs", [])
     if isinstance(recent_runs, list) and recent_runs:
         st.subheader("Recent Runs")
